@@ -4,7 +4,7 @@ name: ci
 # Full product builds, upstream core suites, TSF/UI regressions and packaging stay local/release-only.
 on:
   pull_request:
-    branches: [main]
+    branches: [main, refactor/ctest-upstream-integration]
   workflow_dispatch:
 
 permissions:
