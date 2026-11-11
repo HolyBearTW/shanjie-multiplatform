@@ -16,8 +16,8 @@ concurrency:
 
 jobs:
   unit-tests:
-    # CMake presets use the VS 2022 generator; windows-latest now uses VS 2026.
-    runs-on: windows-2022
+    # VS 2026 compatibility experiment; production PR remains on windows-2022.
+    runs-on: windows-2025
     timeout-minutes: 30
     defaults:
       run:
