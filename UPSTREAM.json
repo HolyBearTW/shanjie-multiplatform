@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/Nanako0129/shanjie",
-  "commit": "ed8a4589a3111eb37da55d0aacadd50486dd6990",
+  "commit": "7d12b7d10c732e5e01b29c106404ea73323a5ec5",
   "release": "v0.7.0",
   "abi": "core/include/shanjie.h",
   "modelSources": "MODEL-SOURCES.json"
