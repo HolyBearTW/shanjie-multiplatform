@@ -1,5 +1,5 @@
 """Release transactions against an in-memory GitHub API; never contacts GitHub."""
-import copy, io, json, os, pathlib, shutil, subprocess, tarfile, tempfile, unittest
+import copy, io, json, os, pathlib, shutil, subprocess, sys, tarfile, tempfile, unittest
 import release as r
 import release_artifacts as artifacts
 
@@ -23,6 +23,10 @@ class LinuxReleaseTests(unittest.TestCase):
         for name in ['package.sh', 'test.sh']:
             shutil.copy2(r.ROOT / 'linux/scripts' / name, scripts / name)
             (scripts / name).chmod(0o755)
+        helpers = self.root / 'scripts'
+        helpers.mkdir()
+        for name in ['release.py', 'release_linux.py']:
+            shutil.copy2(r.ROOT / 'scripts' / name, helpers / name)
         ibus = self.root / 'linux/ibus'
         ibus.mkdir()
         (ibus / 'Cargo.toml').write_text('[package]\nname = "fixture"\nversion = "0.0.1"\n', encoding='utf-8')
@@ -34,6 +38,7 @@ set -euo pipefail
 echo build >> "$SHANJIE_GATE_LOG"
 mkdir -p "$1/files/libexec" "$1/files/share/shanjie/data"
 printf 'synthetic engine' > "$1/files/libexec/ibus-engine-shanjie"
+printf '0.0.1\n' > "$1/VERSION"
 ''', encoding='utf-8', newline='\n')
         (scripts / 'build.sh').chmod(0o755)
         fakebin = self.root / 'fakebin'
@@ -45,6 +50,10 @@ exit "${SHANJIE_FAKE_CONFIGURE_EXIT:-0}"
 ''', encoding='utf-8', newline='\n')
         (fakebin / 'ctest').write_text('''#!/usr/bin/env bash
 set -euo pipefail
+if [[ " $* " = *" --show-only=json-v1 "* ]]; then
+  printf '{"tests":[{"name":"synthetic.linux"}]}\n'
+  exit 0
+fi
 echo ctest >> "$SHANJIE_GATE_LOG"
 fixture="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 test "$SHANJIE_TEST_PROFILE" = 1
@@ -52,21 +61,28 @@ case "$XDG_DATA_HOME" in "$fixture"/build/reports/*/profile/data) ;; *) exit 91 
 while (( $# )); do
   if [[ "$1" = --output-junit ]]; then
     shift
-    : > "$1"
+    printf '<testsuite><testcase name="synthetic.linux" time="0.1"/></testsuite>\n' > "$1"
+  elif [[ "$1" = --output-log ]]; then
+    shift
+    printf 'synthetic CTest log\n' > "$1"
   fi
   shift
 done
 exit "${SHANJIE_FAKE_CTEST_EXIT:-0}"
 ''', encoding='utf-8', newline='\n')
+        (fakebin / 'python3').write_text('''#!/usr/bin/env bash
+exec "$SHANJIE_PYTHON" "$@"
+''', encoding='utf-8', newline='\n')
         for file in fakebin.iterdir():
             file.chmod(0o755)
         self.events = self.root / 'gate.log'
-        self.environment = dict(os.environ, SHANJIE_GATE_LOG=str(self.events),
+        self.environment = dict(os.environ, SHANJIE_GATE_LOG=str(self.events), SHANJIE_PYTHON=sys.executable,
+                                GITHUB_SHA='a'*40, GITHUB_RUN_ID='synthetic-linux-run',
                                 PATH=str(fakebin) + os.pathsep + os.environ['PATH'])
 
-    def run_package(self, **environment):
+    def run_package(self, *arguments, **environment):
         # Only these temporary fixture scripts run; no Cargo, IBus or user data.
-        return subprocess.run([self.bash, 'linux/scripts/package.sh'], cwd=self.root,
+        return subprocess.run([self.bash, 'linux/scripts/package.sh', *map(str, arguments)], cwd=self.root,
                               env=self.environment | environment, capture_output=True, timeout=30)
 
     def test_tests_finish_before_an_archive_is_created(self):
@@ -91,6 +107,56 @@ exit "${SHANJIE_FAKE_CTEST_EXIT:-0}"
         self.assertEqual(result.returncode, 1)
         self.assertEqual(self.events.read_text().splitlines(), ['build', 'configure'])
         self.assertEqual(list((self.root / 'build/linux/dist').glob('*.tar.gz')), [])
+
+    def test_packaging_a_transferred_payload_does_not_repeat_build_or_tests(self):
+        first = self.run_package()
+        self.assertEqual(first.returncode, 0, first.stderr.decode(errors='replace'))
+        payload = next((self.root / 'build/linux/dist').glob('shanjie-linux-*/VERSION')).parent
+        receipt = self.root / 'build/linux/tested.json'
+        report = json.loads(receipt.read_text(encoding='utf-8'))['report']
+        transfer = self.root / 'tested.tar'
+        artifacts.main(['pack', str(transfer), '--root', str(self.root), '--paths',
+                        payload.relative_to(self.root).as_posix(), 'build/linux/tested.json',
+                        report + '/inventory.json', report + '/junit.xml', report + '/ctest.log'])
+        consumer = pathlib.Path(self.temporary.name) / 'package job'
+        for name in ['linux/scripts/package.sh', 'linux/ibus/Cargo.toml', 'scripts/release.py', 'scripts/release_linux.py']:
+            target = consumer / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(self.root / name, target)
+        artifacts.main(['unpack', str(transfer), '--root', str(consumer)])
+        result = subprocess.run([self.bash, 'linux/scripts/package.sh', '--tested',
+                                 str(consumer / payload.relative_to(self.root)), str(consumer / 'build/linux/tested.json')],
+                                cwd=consumer, env=self.environment, capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+        self.assertEqual(self.events.read_text().splitlines(), ['build', 'configure', 'ctest'])
+        self.assertEqual(len(list((consumer / 'build/linux/dist').glob('*.tar.gz'))), 1)
+
+    def test_changed_payload_or_another_run_cannot_reuse_the_receipt(self):
+        first = self.run_package()
+        self.assertEqual(first.returncode, 0, first.stderr.decode(errors='replace'))
+        payload = next((self.root / 'build/linux/dist').glob('shanjie-linux-*/VERSION')).parent
+        receipt = self.root / 'build/linux/tested.json'
+        archive = next((self.root / 'build/linux/dist').glob('*.tar.gz'))
+        accepted_hash = r.filehash(archive)
+        result = self.run_package('--tested', payload, receipt, GITHUB_RUN_ID='another-run')
+        self.assertNotEqual(result.returncode, 0)
+        (payload / 'files/libexec/ibus-engine-shanjie').write_bytes(b'changed after CTest')
+        result = self.run_package('--tested', payload, receipt)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(r.filehash(archive), accepted_hash)
+
+    def test_skipped_linux_junit_cannot_authorize_packaging(self):
+        first = self.run_package()
+        self.assertEqual(first.returncode, 0, first.stderr.decode(errors='replace'))
+        payload = next((self.root / 'build/linux/dist').glob('shanjie-linux-*/VERSION')).parent
+        receipt = self.root / 'build/linux/tested.json'
+        record = json.loads(receipt.read_text(encoding='utf-8'))
+        junit = self.root / record['report'] / 'junit.xml'
+        junit.write_text('<testsuite><testcase name="synthetic.linux"><skipped/></testcase></testsuite>', encoding='utf-8')
+        record['reports']['junit.xml'] = r.filehash(junit)
+        receipt.write_text(json.dumps(record), encoding='utf-8')
+        result = self.run_package('--tested', payload, receipt)
+        self.assertNotEqual(result.returncode, 0)
 
     def test_ctest_inventory_contains_all_unit_suites_and_ibus_scenarios(self):
         cmake, ctest = shutil.which('cmake'), shutil.which('ctest')

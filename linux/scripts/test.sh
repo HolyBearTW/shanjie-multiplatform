@@ -10,5 +10,7 @@ export XDG_CONFIG_HOME="$report/profile/config" XDG_CACHE_HOME="$report/profile/
 export GSETTINGS_BACKEND=memory TMPDIR="$report/tmp"
 
 cmake -S "$root/linux/tests" -B "$root/build/cmake/linux" "-DSHANJIE_LINUX_PAYLOAD=$payload"
+ctest --test-dir "$root/build/cmake/linux" -C Release --show-only=json-v1 > "$report/inventory.json"
 ctest --test-dir "$root/build/cmake/linux" -C Release --parallel 1 --stop-on-failure --no-tests=error \
   --output-on-failure --output-log "$report/ctest.log" --output-junit "$report/junit.xml"
+python3 "$root/scripts/release_linux.py" attest "$payload" "$root/build/linux/tested.json" --report "$report"

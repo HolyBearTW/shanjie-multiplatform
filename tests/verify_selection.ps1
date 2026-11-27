@@ -19,7 +19,7 @@ Expect 'release workflow' @('.github/workflows/release.yml') $false @('fast','te
 Expect 'platform release workflows and composite actions' @('.github/workflows/release-platforms.yml','.github/workflows/release-windows.yml','.github/workflows/release-linux.yml','.github/actions/release-setup/action.yml','.github/actions/release-snapshot/action.yml') $false @('fast','test-framework')
 Expect 'parallel release dispatcher' @('scripts/release-pipeline.ps1','scripts/core-shards.psm1') $false @('fast','test-framework')
 Expect 'release artifact transport' @('scripts/release_artifacts.py') $false @('fast','test-framework')
-Expect 'Linux basic release gate' @('linux/scripts/test.sh','linux/scripts/package.sh','linux/tests/CMakeLists.txt') $false @('fast','test-framework')
+Expect 'Linux basic release gate' @('linux/scripts/test.sh','linux/scripts/package.sh','linux/tests/CMakeLists.txt','scripts/release_linux.py') $false @('fast','test-framework')
 Expect 'Cargo cache keys are a workflow-only change' @('scripts/cargo-cache-key.ps1') $false @('fast','test-framework')
 Expect 'ui' @('ui/Controls/Switch.cs') $false @('fast','settings-ui','candidate-host')
 Expect 'add-word' @('windows/src/word_helper.rs') $false @('fast','windows','word','popup-lifecycle')
