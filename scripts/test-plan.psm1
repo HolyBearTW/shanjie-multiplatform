@@ -43,6 +43,9 @@ function Get-VerificationImpact([string]$Path) {
         '^(scripts/(release|release_artifacts|test_release)\.py|\.github/workflows/(release(?:-(?:platforms|windows|linux))?|ci)\.yml|\.github/actions/release-(?:setup|snapshot)/action\.yml|scripts/(cargo-cache-key|runner-diagnostics|release-pipeline|verify-(changed|selection))\.ps1|scripts/core-shards\.psm1|tests/verify_selection\.ps1)$' {
             $labels=@('test-framework');$reason='Selection and release transaction self-tests; no product build.';break
         }
+        '^linux/(scripts/(test|package)\.sh|tests/CMakeLists\.txt)$' {
+            $labels=@('test-framework');$reason='Linux basic release gate and CTest registration; Windows checks only the framework contract.';break
+        }
         '^(platform/(candidates_windows|composition_windows|input_windows|key_options_windows|learning_windows|mapped_array|mapped_lm|map_model|resident_windows|selection_journal_windows|selection_learning_windows|smart_input_windows|word_set_windows)\.rs|scripts/prepare-(core|lm|candidates|keys|smart-input|selection-learning|resident|memory|english)\.ps1)$' {
             $labels=@('rust','core','english','submission');$reason='Prepared core implementation retains core regressions; G05 remains a separately requested special test.';break
         }

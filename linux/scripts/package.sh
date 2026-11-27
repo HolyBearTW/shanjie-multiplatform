@@ -8,6 +8,7 @@ dist="$root/build/linux/dist"
 rm -rf "$dist/$name"
 mkdir -p "$dist"
 "$root/linux/scripts/build.sh" "$dist/$name"
+bash "$root/linux/scripts/test.sh" "$dist/$name"
 install -m644 "$root/linux/package/README.txt" "$dist/$name/"
 tar -C "$dist" -czf "$dist/$name.tar.gz" "$name"
 (cd "$dist" && sha256sum "$name.tar.gz" > "$name.tar.gz.sha256")

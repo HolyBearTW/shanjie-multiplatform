@@ -333,7 +333,7 @@ jobs:
     steps:
       - name: Install build tools
         run: |
-          dnf install -y git gh rust cargo gcc pkgconf-pkg-config gtk4-devel libadwaita-devel \
+          dnf install -y git gh rust cargo gcc cmake make pkgconf-pkg-config gtk4-devel libadwaita-devel ibus python3-gobject dbus-daemon \
             https://github.com/PowerShell/PowerShell/releases/download/v7.5.4/powershell-7.5.4-1.rh.x86_64.rpm
           git config --global --add safe.directory '*'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node.js 24)
@@ -346,8 +346,18 @@ jobs:
         with:
           path: build/model
           key: models-${{ hashFiles('MODEL-SOURCES.json') }}
-      - name: Build the package
+      - name: Build, CTest and package
         run: linux/scripts/package.sh
+      - name: Upload Linux test reports
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: linux-ctest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            build/reports/linux-*/junit.xml
+            build/reports/linux-*/ctest.log
+          if-no-files-found: warn
+          retention-days: 14
       - name: Prepare verified release assets
         run: |
           python3 scripts/release.py manifest --platform linux --folder build/linux/dist

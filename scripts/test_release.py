@@ -1,7 +1,122 @@
 """Release transactions against an in-memory GitHub API; never contacts GitHub."""
-import copy, io, json, pathlib, shutil, tarfile, tempfile, unittest
+import copy, io, json, os, pathlib, shutil, subprocess, tarfile, tempfile, unittest
 import release as r
 import release_artifacts as artifacts
+
+
+class LinuxReleaseTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.bash = shutil.which('bash')
+        if os.name == 'nt':
+            git = shutil.which('git')
+            cls.bash = str(pathlib.Path(git).parent.parent / 'bin/bash.exe') if git else None
+        if not cls.bash or not pathlib.Path(cls.bash).is_file():
+            raise unittest.SkipTest('Bash is required for Linux package gate self-tests')
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='shanjie-linux-gate-')
+        self.addCleanup(self.temporary.cleanup)
+        self.root = pathlib.Path(self.temporary.name) / 'source tree'
+        scripts = self.root / 'linux/scripts'
+        scripts.mkdir(parents=True)
+        for name in ['package.sh', 'test.sh']:
+            shutil.copy2(r.ROOT / 'linux/scripts' / name, scripts / name)
+            (scripts / name).chmod(0o755)
+        ibus = self.root / 'linux/ibus'
+        ibus.mkdir()
+        (ibus / 'Cargo.toml').write_text('[package]\nname = "fixture"\nversion = "0.0.1"\n', encoding='utf-8')
+        package = self.root / 'linux/package'
+        package.mkdir()
+        (package / 'README.txt').write_text('synthetic package fixture', encoding='utf-8')
+        (scripts / 'build.sh').write_text('''#!/usr/bin/env bash
+set -euo pipefail
+echo build >> "$SHANJIE_GATE_LOG"
+mkdir -p "$1/files/libexec" "$1/files/share/shanjie/data"
+printf 'synthetic engine' > "$1/files/libexec/ibus-engine-shanjie"
+''', encoding='utf-8', newline='\n')
+        (scripts / 'build.sh').chmod(0o755)
+        fakebin = self.root / 'fakebin'
+        fakebin.mkdir()
+        (fakebin / 'cmake').write_text('''#!/usr/bin/env bash
+set -euo pipefail
+echo configure >> "$SHANJIE_GATE_LOG"
+exit "${SHANJIE_FAKE_CONFIGURE_EXIT:-0}"
+''', encoding='utf-8', newline='\n')
+        (fakebin / 'ctest').write_text('''#!/usr/bin/env bash
+set -euo pipefail
+echo ctest >> "$SHANJIE_GATE_LOG"
+fixture="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+test "$SHANJIE_TEST_PROFILE" = 1
+case "$XDG_DATA_HOME" in "$fixture"/build/reports/*/profile/data) ;; *) exit 91 ;; esac
+while (( $# )); do
+  if [[ "$1" = --output-junit ]]; then
+    shift
+    : > "$1"
+  fi
+  shift
+done
+exit "${SHANJIE_FAKE_CTEST_EXIT:-0}"
+''', encoding='utf-8', newline='\n')
+        for file in fakebin.iterdir():
+            file.chmod(0o755)
+        self.events = self.root / 'gate.log'
+        self.environment = dict(os.environ, SHANJIE_GATE_LOG=str(self.events),
+                                PATH=str(fakebin) + os.pathsep + os.environ['PATH'])
+
+    def run_package(self, **environment):
+        # Only these temporary fixture scripts run; no Cargo, IBus or user data.
+        return subprocess.run([self.bash, 'linux/scripts/package.sh'], cwd=self.root,
+                              env=self.environment | environment, capture_output=True, timeout=30)
+
+    def test_tests_finish_before_an_archive_is_created(self):
+        result = self.run_package()
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+        self.assertEqual(self.events.read_text().splitlines(), ['build', 'configure', 'ctest'])
+        archives = list((self.root / 'build/linux/dist').glob('*.tar.gz'))
+        self.assertEqual(len(archives), 1)
+        with tarfile.open(archives[0]) as archive:
+            self.assertTrue(any(name.endswith('/README.txt') for name in archive.getnames()))
+        self.assertIn(r.filehash(archives[0]), archives[0].with_name(archives[0].name + '.sha256').read_text())
+
+    def test_a_failed_ctest_blocks_packaging_and_keeps_reports(self):
+        result = self.run_package(SHANJIE_FAKE_CTEST_EXIT='8')
+        self.assertEqual(result.returncode, 8)
+        self.assertEqual(self.events.read_text().splitlines(), ['build', 'configure', 'ctest'])
+        self.assertEqual(list((self.root / 'build/linux/dist').glob('*.tar.gz')), [])
+        self.assertEqual(len(list((self.root / 'build/reports').rglob('junit.xml'))), 1)
+
+    def test_a_failed_configuration_stops_before_tests_and_packaging(self):
+        result = self.run_package(SHANJIE_FAKE_CONFIGURE_EXIT='1')
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(self.events.read_text().splitlines(), ['build', 'configure'])
+        self.assertEqual(list((self.root / 'build/linux/dist').glob('*.tar.gz')), [])
+
+    def test_ctest_inventory_contains_all_unit_suites_and_ibus_scenarios(self):
+        cmake, ctest = shutil.which('cmake'), shutil.which('ctest')
+        if not cmake or not ctest:
+            self.skipTest('CMake and CTest are required for inventory validation')
+        binary = self.root / 'inventory'
+        payload = self.root / 'payload'
+        payload.mkdir()
+        result = subprocess.run([cmake, '-S', str(r.ROOT / 'linux/tests'), '-B', str(binary),
+                                 '-DSHANJIE_LINUX_PAYLOAD=' + str(payload)], capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr.decode(errors='replace'))
+        result = subprocess.run([ctest, '--test-dir', str(binary), '-C', 'Release', '--show-only=json-v1'],
+                                check=True, capture_output=True, timeout=30)
+        inventory = json.loads(result.stdout)
+        units = {'linux.rust.' + name for name in ['shared', 'common', 'ibus', 'settings']}
+        scenarios = {'linux.ibus.' + file.stem for file in (r.ROOT / 'linux/tests/scenarios').glob('*.json')}
+        names = [test['name'] for test in inventory['tests']]
+        self.assertEqual(set(names), units | scenarios)
+        self.assertEqual(len(names), len(units | scenarios))
+        for test in inventory['tests']:
+            if test['name'] in units:
+                self.assertIn('--locked', test['command'])
+                self.assertIn('--test-threads=1', test['command'])
+                self.assertNotIn('--ignored', test['command'])
+            else:
+                self.assertEqual(pathlib.Path(test['command'][-2]).parent.parent, payload / 'files')
 
 
 class ReleaseArtifactTests(unittest.TestCase):
