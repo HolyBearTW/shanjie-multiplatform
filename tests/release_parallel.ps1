@@ -47,7 +47,11 @@ foreach($file in 'Cargo.toml','Cargo.lock','src/lib.rs','tests/fixture.rs'){[IO.
 [IO.File]::WriteAllText("$compiled/core-test-fixture.dll",'synthetic runtime dependency')
 $binaries=@(foreach($name in $names){
     $exe=Join-Path $compiled "$name.cmd"
-    [IO.File]::WriteAllText($exe,"@echo off`r`nif `"%1`"==`"--list`" goto list`r`nif `"%SHANJIE_SYNTHETIC_CORE_FAIL%`"==`"$name`" exit /b 1`r`necho running 1 test`r`necho test sample ... ok`r`necho test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`r`nexit /b 0`r`n:list`r`necho sample: test`r`nexit /b 0`r`n")
+    $output=if($name -eq 'core'){
+        "echo running 3 tests`r`necho test sample ... ok`r`necho test expected_panic - should panic ... ok`r`necho test optional_case ... ignored, synthetic optional test`r`necho test result: ok. 2 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out`r`n"
+    }else{"echo running 1 test`r`necho test sample ... ok`r`necho test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`r`n"}
+    $listing="echo sample: test`r`n"+$(if($name -eq 'core'){"echo expected_panic: test`r`necho optional_case: test`r`n"})
+    [IO.File]::WriteAllText($exe,"@echo off`r`nif `"%1`"==`"--list`" goto list`r`nif `"%SHANJIE_SYNTHETIC_CORE_FAIL%`"==`"$name`" exit /b 1`r`n${output}exit /b 0`r`n:list`r`n${listing}exit /b 0`r`n")
     [pscustomobject]@{Name=$name;Path=$exe}
 })
 New-CoreTestBundle $FixtureRoot $bundle $binaries $resources $models ('a'*64) @()
@@ -82,6 +86,31 @@ $receiptRoot=Join-Path $FixtureRoot "build/reports/parallel-fixture-$($snapshot.
 $coreEvidence=Join-Path $receiptRoot 'core'
 foreach($plan in $plans){Invoke-CoreTestShard $FixtureRoot $snapshot $plan.id "$coreEvidence/$($plan.id)"}
 Assert-CoreShardEvidence $FixtureRoot $snapshot $coreEvidence
+# Rehash the intentionally changed log in each fixture receipt so these cases
+# exercise assertion parsing after stream integrity has already been checked.
+$shareReceiptPath=Join-Path $coreEvidence 'share/receipt.json'
+$shareReceiptOriginal=[IO.File]::ReadAllText($shareReceiptPath)
+$shareReceipt=$shareReceiptOriginal | ConvertFrom-Json -AsHashtable
+$coreResult=$shareReceipt.results | Where-Object name -eq 'core'
+$coreLogPath=Join-Path (Split-Path $shareReceiptPath -Parent) $coreResult.stdout
+$coreLogOriginal=[IO.File]::ReadAllText($coreLogPath)
+foreach($invalidLog in @(
+    $coreLogOriginal.Replace("test expected_panic - should panic ... ok`r`n",''),
+    $coreLogOriginal.Replace('test expected_panic - should panic ... ok','test expected_panic - should panic ... FAILED'),
+    ($coreLogOriginal+"test expected_panic - should panic ... ok`r`n")
+)){
+    try{
+        [IO.File]::WriteAllText($coreLogPath,$invalidLog)
+        $coreResult.stdout_sha256=(Get-FileHash $coreLogPath).Hash.ToLowerInvariant()
+        $shareReceipt | ConvertTo-Json -Depth 12 | Set-Content $shareReceiptPath -Encoding utf8NoBOM
+        $rejected=$false
+        try{Assert-CoreShardEvidence $FixtureRoot $snapshot $coreEvidence *> $null}catch{$rejected=$true}
+        if(!$rejected){throw 'Missing, failed or duplicated expected-panic assertions must reject shard evidence.'}
+    }finally{
+        [IO.File]::WriteAllText($coreLogPath,$coreLogOriginal)
+        [IO.File]::WriteAllText($shareReceiptPath,$shareReceiptOriginal)
+    }
+}
 $previousFailure=$env:SHANJIE_SYNTHETIC_CORE_FAIL
 $env:SHANJIE_SYNTHETIC_CORE_FAIL='engine_mixed'
 $failedRoot=Join-Path $receiptRoot 'failed-process'

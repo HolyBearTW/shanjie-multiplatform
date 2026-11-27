@@ -168,7 +168,7 @@ function Assert-CoreShardEvidence([string]$ProjectRoot,$Snapshot,[string]$Eviden
             $summary=[regex]::Match($log,'test result: ok\. (\d+) passed; 0 failed; (\d+) ignored;')
             if(!$summary.Success -or ([int]$summary.Groups[1].Value+[int]$summary.Groups[2].Value) -ne $binary.cases.Count){throw 'Core assertion log coverage is incomplete.'}
             foreach($case in $binary.cases){
-                if([regex]::Matches($log,('(?m)^test '+[regex]::Escape($case)+' \.\.\. (ok|ignored(?:, [^\r\n]*)?)\r?$')).Count -ne 1){throw "Missing or duplicated core assertion log: $($result.name)/$case"}
+                if([regex]::Matches($log,('(?m)^test '+[regex]::Escape($case)+'(?: - should panic)? \.\.\. (ok|ignored(?:, [^\r\n]*)?)\r?$')).Count -ne 1){throw "Missing or duplicated core assertion log: $($result.name)/$case"}
             }
             Write-Host ("Verified {0}/{1}: {2:F1}s, executable {3}" -f $plan.id,$result.name,$result.duration_seconds,$result.executable_sha256)
         }
