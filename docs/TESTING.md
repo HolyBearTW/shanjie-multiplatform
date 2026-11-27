@@ -44,7 +44,7 @@ GitHub Actions 固定使用 `pwsh -File scripts/test.ps1 -Level CI -CiSafe`，�
 
 PR 指向 main 時，開啟、更新提交與重新開啟會跑輕量 CI；`workflow_dispatch` 也只跑相同集合。一般開發分支 push、本機編譯、commit 或 CTest 都不觸發 Actions。完整驗收在本機執行；未另加自動或手動 FULL workflow。既有 release workflow 仍只在 main 的版本檔變更或明確手動啟動時執行，手動預設僅驗證，發布仍受原本的版本、相依 job 與模式檢查約束。
 
-Release Actions 主流程保留 `windows`、`linux` 兩個平台入口，分別呼叫 `release-windows.yml` 與 `release-linux.yml`；不再提供 legacy 或 `pipeline` 選項，`mode` 仍預設 `verify`。Windows 一律使用平行流程：同時建置 x64、x86 與完整 37 支核心測試執行檔，驗證建置收據後封存共同 snapshot，再平行執行雙架構 CTest 與四個核心 shard。Linux 沿用 `RELEASE-CHANNEL.json` 的 `build_linux` 開關及既有 Fedora 封裝流程。
+Release Actions 主流程為 `Plan` → `Release` → `Publish`。`Release` 呼叫 `release-platforms.yml`，整合 Windows 平行流程與選用的 Linux Job；Linux 放在該子流程定義的最後，保留與 Windows 建置平行執行的關係，實際圖表位置由 GitHub 排版。`mode` 預設 `verify`，不提供 legacy 或 `pipeline` 選項。Windows 同時建置 x64、x86 與完整 37 支核心測試執行檔，驗證建置收據後封存共同 snapshot，再平行執行雙架構 CTest 與四個核心 shard。Linux 沿用 `RELEASE-CHANNEL.json` 的 `build_linux` 開關及既有 Fedora 封裝流程；啟用時，兩平台全部成功才允許發布。
 
 Actions 中 `Build Core` 準備核心測試執行檔；`CTest x64/x86` 執行各架構 CTest；`Core cap/mixed/share/latency` 是四個直接執行預編譯核心測試的分片；`CTest Merge` 核對分片證據；`CTest Package` 執行封裝驗證。四個分片依賴 `Snapshot`，上游工作完成後才會展開 matrix。`engine_cap` 獨立一片，其餘依 Run 45828667360 的實測成本分配；`engine_lm`、`engine_replay`、`engine_newword` 在同一 runner 依序以單行程、單執行緒執行，完成後才跑該片其他測試。分片不呼叫 Cargo；執行檔與相依 DLL 從 Cargo 回傳的實際路徑收集，上游編譯期 fixture 路徑要求各 job 使用相同 checkout 路徑。
 
@@ -228,7 +228,7 @@ CTest 與核心測試統一採用「上次失敗優先，其次耗時較長優�
 - 每個架構的 36 個 `input-digits` 案例依三種混打設定各啟動一次 submission harness。每案重新建立 TSF document、context 及 text store，清除候選和組字，並沿用該組已載入的引擎。報告保留每案的預期文字、通過結果、耗時與 harness PID。
 - core overlay、英文清單、upstream 資料 export、模型轉換與 WinUI publish 以來源、參數、架構、工具版本／upstream pin 及輸出內容 hash 驗證快取。失效時重新生成；只存在檔案不會命中快取。
 - 模型測試分配到兩個 CTest resource slots，最多同時載入兩組模型；core suite 與混打回歸會鎖住兩個 slots，避免與其他模型載入競爭。私人桌面案例另用共用鎖逐案執行，確保各案例的桌面與核心清理不互相干擾。Core suite 仍使用原本記憶體限制排程。不同 profile 的核心不共用生命週期；shared/windows Cargo 共用的目標目錄也有獨立鎖。
-- 測試 payload 僅建立在 `build/cmake/`，`data` 是指向 `dist/`（RELEASE 時指向本次快照）的唯讀 junction，`tools` 保留 #96 的私人執行檔副本，避免核心 IPC 使用正式工具路徑。相同工具內容不重複複製；舊版已知 tools junction 僅搬移連結本身後替換，不走訪或刪除目標。測試不註冊輸入法、不碰正式使用者資料、不停止使用者核心。
+- 測試 payload 僅建立在 `build/cmake/`，`data` 是指向 `dist/`（RELEASE 時指向本次快照）的唯讀 junction，`tools` 保留 #96 的私人執行檔副本，避免核心 IPC 使用正式工具路徑。TSF smoke 的模型前置檢查與執行都使用當輪 runtime payload。相同工具內容不重複複製；舊版已知 tools junction 僅搬移連結本身後替換，不走訪或刪除目標。測試不註冊輸入法、不碰正式使用者資料、不停止使用者核心。
 - 英文鍵、提交、加詞視窗與非視覺 TSF smoke 在不切換的私人測試桌面執行，隔離目前桌面的實際 Alt／Ctrl／Shift 與前景視窗變動；既有私人桌面案例也保持隔離。這不代表已驗證使用者正在操作的前景 App。
 - WinUI 子程序建立前即設定隔離 profile 與行程內核心，避免 XAML 初始化時啟動已安裝的常駐核心；不列舉或停止工作副本外的核心。各階段結果保留在本次報告目錄，停用設定重開前封存舊 PASS 輸出。截圖依 #100 預設不產生；需要視覺審查時明確使用 `verify-ui.ps1 -Visual`，必要斷言照常執行。
 
