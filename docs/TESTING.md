@@ -44,6 +44,12 @@ GitHub Actions 固定使用 `pwsh -File scripts/test.ps1 -Level CI -CiSafe`，�
 
 PR 指向 main 時，開啟、更新提交與重新開啟會跑輕量 CI；`workflow_dispatch` 也只跑相同集合。一般開發分支 push、本機編譯、commit 或 CTest 都不觸發 Actions。完整驗收在本機執行；未另加自動或手動 FULL workflow。既有 release workflow 仍只在 main 的版本檔變更或明確手動啟動時執行，手動預設僅驗證，發布仍受原本的版本、相依 job 與模式檢查約束。
 
+Release Actions 的 `pipeline` 預設為 `parallel`，可手動選 `legacy` 保留原單一 Windows job；`mode` 仍預設 `verify`。平行流程同時建置 x64、x86 與完整 37 支核心測試執行檔，驗證建置收據後封存共同 snapshot，再平行執行雙架構 CTest 與四個核心 shard。`engine_cap` 獨立一片；其餘依 Run 45828667360 的實測成本分配；`engine_lm`、`engine_replay`、`engine_newword` 在同一 runner 依序以單行程、單執行緒執行，完成後才跑該片其他測試。分片不呼叫 Cargo；上游編譯期 fixture 路徑要求各 job 使用相同 checkout 路徑。
+
+每片保存執行檔、來源、模型、fixture 與日誌雜湊，以及逐 binary 的實際結果。彙整時 `full.core-suite` 的 CTest delegate 核對四份收據、37 支唯一歸屬及逐斷言日誌，再由 CTest 寫出該邏輯項目的 JUnit。雙架構 JUnit、完整子案例與同 commit／run／snapshot 證據全部通過後才簽發 packaging permit。Package job 重新核對 permit、同一快照與最終安裝檔 SHA-256。CI-safe 原有互動 UI 略過清單不變，產物仍只標示為 GitHub Actions artifact。
+
+兩種 RELEASE pipeline 及 FULL 均重新執行必要核心斷言，不採用以前的 passed 結果；非正式 AFFECTED 才可依既有精確指紋收據重用，重型清單含 `engine_mixed`。Cargo 部分還原仍由 Cargo fingerprint 與產生來源收據重新驗證。WinUI 快取包含 SDK、全部來源／設定及輸出檔案雜湊；本輪原生 DLL 一律重新置入。
+
 直接使用 CTest：
 
 ```powershell
@@ -85,7 +91,7 @@ CTest 單獨執行時，先用 `scripts/build.ps1 -Architecture x64` 準備產�
 | 只有文件 | 不建置、不測試 | 0 項；規則文件更新只提示人工核對 |
 | CI workflow／交易選測規則 | 對應 Rust／交易或規則自檢 | 固定 FAST 基線 5 項；相較原本只跑 Python／選測的情境會多基線檢查，不聲稱每條路徑都更少 |
 
-`verify-changed` 原本會自動執行 platform 的 `measure` 步驟；現在 AFFECTED 清楚列為 `required-extra`，由開發者／Codex 依 Markdown 完成並保留結果，**不自動執行、不把未量測列為 PASS**。本版沒有新增跨報告的全自動去重／收據合併系統；既有成功證據須按上述身分核對，已完成的相同驗證不額外啟動舊 wrapper。
+`verify-changed` 原本會自動執行 platform 的 `measure` 步驟；現在 AFFECTED 清楚列為 `required-extra`，由開發者／Codex 依 Markdown 完成並保留結果，**不自動執行、不把未量測列為 PASS**。一般 AFFECTED 不自動合併歷史報告；Release Actions 的跨 job 彙整只接受本次共同快照的證據。既有成功證據須按上述身分核對，已完成的相同驗證不額外啟動舊 wrapper。
 
 每次 JSON 都列出 CTest 選中／未選項目的理由，以及各架構英文鍵 37 組與提交流程的實際子案例。原鍵混打的 Shift 英文與 Caps Lock 後接注音各驗證正式拼寫關閉與開啟。WinUI 啟動三情境、停用控制項三種鍵盤各 initial／reopen，另有 9 個具參數的子案例。`results[].attempts` 和子案例的 `attempts` 保留每次執行，重試後通過會標示 `flaky`，首次失敗 JUnit／日誌不被覆寫。CTest fixture 會明列在計畫中；選中卻未執行的項目不能讓整輪通過。CI-safe 略過的互動項目有獨立原因，不列為 PASS。
 
