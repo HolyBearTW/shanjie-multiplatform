@@ -12,6 +12,7 @@ permissions:
 
 jobs:
   package:
+    name: Package
     runs-on: ubuntu-latest
     # Linux 版的目標是 Fedora 44 GNOME；在同版容器建置，GTK 4／libadwaita 與 glibc 和使用者一致。
     container: fedora:44

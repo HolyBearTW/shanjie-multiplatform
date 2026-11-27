@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   release:
-    name: Release Plan
+    name: Plan
     runs-on: ubuntu-latest
     outputs:
       tag: ${{ steps.release.outputs.tag }}
@@ -43,15 +43,12 @@ jobs:
           python3 scripts/release.py plan "${flags[@]}"
 
   windows:
+    name: Windows
     needs: release
     uses: ./.github/workflows/release-windows.yml
 
-  linux:
-    needs: release
-    if: needs.release.outputs.build_linux == 'true'
-    uses: ./.github/workflows/release-linux.yml
-
   publish:
+    name: Publish
     needs: [release, windows, linux]
     if: >-
       ${{ always() && needs.release.outputs.publish == 'true' &&
@@ -78,3 +75,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release.py publish --folder build/release-assets
+
+  linux:
+    name: Linux
+    needs: release
+    if: needs.release.outputs.build_linux == 'true'
+    uses: ./.github/workflows/release-linux.yml

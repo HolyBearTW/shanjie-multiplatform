@@ -66,7 +66,7 @@ jobs:
           retention-days: 3
 
   prepare-core:
-    name: Prepare Core Test Binaries
+    name: Build Core
     runs-on: windows-2025-vs2026
     timeout-minutes: 45
     defaults:
@@ -81,7 +81,7 @@ jobs:
       - uses: ./.github/actions/release-setup
         with:
           role: core
-      - name: Compile all upstream core executables once, without running assertions
+      - name: Compile core tests
         run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase PrepareCore
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -92,7 +92,7 @@ jobs:
           retention-days: 3
 
   seal:
-    name: Seal Release Snapshot
+    name: Snapshot
     needs: [build-x64, build-x86, prepare-core]
     runs-on: windows-2025-vs2026
     timeout-minutes: 15
@@ -140,7 +140,7 @@ jobs:
           retention-days: 3
 
   verify:
-    name: CTest - ${{ matrix.architecture }} acceptance
+    name: CTest ${{ matrix.architecture }}
     needs: seal
     runs-on: windows-2025-vs2026
     timeout-minutes: 45
@@ -162,7 +162,7 @@ jobs:
       - uses: ./.github/actions/release-snapshot
         with:
           id: ${{ needs.seal.outputs.snapshot_id }}
-      - name: CTest - execute architecture acceptance from the sealed snapshot
+      - name: Run CTest
         run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Verify -Architecture '${{ matrix.architecture }}' -SnapshotId '${{ needs.seal.outputs.snapshot_id }}' -SnapshotHash '${{ needs.seal.outputs.snapshot_sha256 }}'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -180,7 +180,7 @@ jobs:
           retention-days: 7
 
   core-tests:
-    name: Core Binaries - ${{ matrix.shard }} shard
+    name: Core ${{ matrix.shard }}
     needs: seal
     runs-on: windows-2025-vs2026
     timeout-minutes: 30
@@ -200,7 +200,7 @@ jobs:
       - uses: ./.github/actions/release-snapshot
         with:
           id: ${{ needs.seal.outputs.snapshot_id }}
-      - name: Core Binaries - execute assigned assertions without recompiling
+      - name: Run core shard
         run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Shard -Shard '${{ matrix.shard }}' -SnapshotId '${{ needs.seal.outputs.snapshot_id }}' -SnapshotHash '${{ needs.seal.outputs.snapshot_sha256 }}'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -218,7 +218,7 @@ jobs:
           retention-days: 7
 
   aggregate:
-    name: CTest - aggregate core evidence and release coverage
+    name: CTest Merge
     needs: [seal, verify, core-tests]
     runs-on: windows-2025-vs2026
     timeout-minutes: 15
@@ -250,7 +250,7 @@ jobs:
             python scripts/release_artifacts.py unpack $file.FullName --root .
             if ($LASTEXITCODE) { throw 'Evidence extraction failed.' }
           }
-      - name: CTest full.core-suite - validate all shard receipts and release coverage
+      - name: Verify core receipts
         run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Aggregate -SnapshotId '${{ needs.seal.outputs.snapshot_id }}' -SnapshotHash '${{ needs.seal.outputs.snapshot_sha256 }}'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -268,7 +268,7 @@ jobs:
           retention-days: 7
 
   package:
-    name: CTest - package and verify installer
+    name: CTest Package
     needs: [seal, aggregate]
     runs-on: windows-2025-vs2026
     timeout-minutes: 20
@@ -294,7 +294,7 @@ jobs:
         run: |
           python scripts/release_artifacts.py unpack build/parallel/evidence-download/evidence.tar --root .
           if ($LASTEXITCODE) { throw 'Evidence extraction failed.' }
-      - name: CTest release.package - package sealed inputs and verify installer integrity
+      - name: Package and verify
         run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Package -SnapshotId '${{ needs.seal.outputs.snapshot_id }}' -SnapshotHash '${{ needs.seal.outputs.snapshot_sha256 }}'
       - name: Retain final acceptance reports and logs
         if: always()
