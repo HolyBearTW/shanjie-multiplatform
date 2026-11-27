@@ -16,7 +16,7 @@ Expect 'docs only' @('docs/DESIGN.md','Changelog.md','README.md') $false @() $tr
 Expect 'windows-style separators' @('docs\ARCHITECTURE.md') $false @() $true
 Expect 'release script' @('scripts/release.py') $false @('fast','test-framework')
 Expect 'release workflow' @('.github/workflows/release.yml') $false @('fast','test-framework')
-Expect 'platform release workflows and composite actions' @('.github/workflows/release-windows.yml','.github/workflows/release-linux.yml','.github/actions/release-setup/action.yml','.github/actions/release-snapshot/action.yml') $false @('fast','test-framework')
+Expect 'platform release workflows and composite actions' @('.github/workflows/release-platforms.yml','.github/workflows/release-windows.yml','.github/workflows/release-linux.yml','.github/actions/release-setup/action.yml','.github/actions/release-snapshot/action.yml') $false @('fast','test-framework')
 Expect 'parallel release dispatcher' @('scripts/release-pipeline.ps1','scripts/core-shards.psm1') $false @('fast','test-framework')
 Expect 'release artifact transport' @('scripts/release_artifacts.py') $false @('fast','test-framework')
 Expect 'Cargo cache keys are a workflow-only change' @('scripts/cargo-cache-key.ps1') $false @('fast','test-framework')

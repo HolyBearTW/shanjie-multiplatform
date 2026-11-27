@@ -42,18 +42,19 @@ jobs:
           if [ "$VERIFY_ONLY" = "true" ]; then flags=(--verify); fi
           python3 scripts/release.py plan "${flags[@]}"
 
-  windows:
-    name: Windows
+  platforms:
+    name: Release
     needs: release
-    uses: ./.github/workflows/release-windows.yml
+    uses: ./.github/workflows/release-platforms.yml
+    with:
+      build_linux: ${{ needs.release.outputs.build_linux == 'true' }}
 
   publish:
     name: Publish
-    needs: [release, windows, linux]
+    needs: [release, platforms]
     if: >-
       ${{ always() && needs.release.outputs.publish == 'true' &&
-          needs.windows.result == 'success' &&
-          (needs.linux.result == 'success' || needs.linux.result == 'skipped') }}
+          needs.platforms.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -64,20 +65,14 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: ${{ needs.windows.outputs.artifact_name }}
+          name: ${{ needs.platforms.outputs.artifact_name }}
           path: build/release-assets/windows
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         if: needs.release.outputs.build_linux == 'true'
         with:
-          name: ${{ needs.linux.outputs.artifact_name }}
+          name: ${{ needs.platforms.outputs.linux_artifact_name }}
           path: build/release-assets/linux
       - name: Resume and publish only a complete same-source draft
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/release.py publish --folder build/release-assets
-
-  linux:
-    name: Linux
-    needs: release
-    if: needs.release.outputs.build_linux == 'true'
-    uses: ./.github/workflows/release-linux.yml
