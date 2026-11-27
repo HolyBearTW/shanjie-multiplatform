@@ -46,7 +46,7 @@ PR 指向 main 時，開啟、更新提交與重新開啟會跑輕量 CI；`work
 
 Release Actions 主流程保留 `windows`、`linux` 兩個平台入口，分別呼叫 `release-windows.yml` 與 `release-linux.yml`；不再提供 legacy 或 `pipeline` 選項，`mode` 仍預設 `verify`。Windows 一律使用平行流程：同時建置 x64、x86 與完整 37 支核心測試執行檔，驗證建置收據後封存共同 snapshot，再平行執行雙架構 CTest 與四個核心 shard。Linux 沿用 `RELEASE-CHANNEL.json` 的 `build_linux` 開關及既有 Fedora 封裝流程。
 
-Actions 中 `CTest - x64/x86 acceptance` 執行各架構 CTest；`Core Binaries - ... shard` 直接執行預編譯核心測試；`CTest - aggregate core evidence and release coverage` 核對分片證據；`CTest - package and verify installer` 執行封裝驗證。`engine_cap` 獨立一片，其餘依 Run 45828667360 的實測成本分配；`engine_lm`、`engine_replay`、`engine_newword` 在同一 runner 依序以單行程、單執行緒執行，完成後才跑該片其他測試。分片不呼叫 Cargo；執行檔與相依 DLL 從 Cargo 回傳的實際路徑收集，上游編譯期 fixture 路徑要求各 job 使用相同 checkout 路徑。
+Actions 中 `Build Core` 準備核心測試執行檔；`CTest x64/x86` 執行各架構 CTest；`Core cap/mixed/share/latency` 是四個直接執行預編譯核心測試的分片；`CTest Merge` 核對分片證據；`CTest Package` 執行封裝驗證。四個分片依賴 `Snapshot`，上游工作完成後才會展開 matrix。`engine_cap` 獨立一片，其餘依 Run 45828667360 的實測成本分配；`engine_lm`、`engine_replay`、`engine_newword` 在同一 runner 依序以單行程、單執行緒執行，完成後才跑該片其他測試。分片不呼叫 Cargo；執行檔與相依 DLL 從 Cargo 回傳的實際路徑收集，上游編譯期 fixture 路徑要求各 job 使用相同 checkout 路徑。
 
 每片保存執行檔、來源、模型、fixture 與日誌雜湊，以及逐 binary 的實際結果。跨 job Artifact 由 `scripts/release_artifacts.py` 以 Python 標準庫封存／解封；解封快照後還原唯讀屬性，並由消費端核對原有 SHA-256。彙整時 `full.core-suite` 的 CTest delegate 核對四份收據、37 支唯一歸屬及逐斷言日誌，再由 CTest 寫出該邏輯項目的 JUnit。雙架構 JUnit、完整子案例與同 commit／run／snapshot 證據全部通過後才簽發 packaging permit。Package job 重新核對 permit、同一快照與最終安裝檔 SHA-256。CI-safe 原有互動 UI 略過清單不變，產物仍只標示為 GitHub Actions artifact。
 
