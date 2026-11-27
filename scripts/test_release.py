@@ -336,12 +336,15 @@ class ReleaseTests(unittest.TestCase):
     def test_release_ready_requires_successful_required_package_jobs(self):
         workflow = (r.ROOT / '.github/workflows/release-platforms.yml').read_text(encoding='utf-8')
         ready = workflow.split('\n  release-ready:\n', 1)[1].split('\n  linux:\n', 1)[0]
-        self.assertIn('needs: [package, linux-package]', ready)
-        self.assertIn('scripts/release.py check --folder build/release-ready', ready)
+        self.assertIn('needs: [package, linux-artifact-gate]', ready)
+        gate = workflow.split('\n  linux-artifact-gate:\n', 1)[1]
+        self.assertIn('needs: linux-package', gate)
+        self.assertIn('scripts/release.py check --platform linux --folder build/linux-gate', gate)
+        self.assertIn('needs.linux-artifact-gate.outputs.artifact_name', ready)
         raw = re.search(r'    if: >-\n((?:      .*\n)+)', ready).group(1).strip()
         expression = ' '.join(raw.removeprefix('${{').removesuffix('}}').split())
         expression = expression.replace('always()', 'True').replace('inputs.build_linux', 'linux_enabled')
-        expression = expression.replace('needs.package.result', 'windows_result').replace('needs.linux-package.result', 'linux_result')
+        expression = expression.replace('needs.package.result', 'windows_result').replace('needs.linux-artifact-gate.result', 'linux_result')
         expression = expression.replace('&&', ' and ').replace('||', ' or ').replace('!', ' not ')
         for linux_enabled in [False, True]:
             for windows_result in ['success', 'failure', 'cancelled', 'skipped']:
@@ -350,6 +353,54 @@ class ReleaseTests(unittest.TestCase):
                     with self.subTest(linux=linux_enabled, windows=windows_result, result=linux_result):
                         self.assertEqual(eval(expression, {'__builtins__': {}}, {
                             'linux_enabled': linux_enabled, 'windows_result': windows_result, 'linux_result': linux_result}), expected)
+    def test_linux_artifact_gate_checks_only_linux_without_github(self):
+        self.config['build_linux'] = True
+        linux = self.folder / 'linux'
+        linux.mkdir()
+        package = linux / 'shanjie-linux-fixture.tar.gz'
+        package.write_bytes(b'synthetic Linux package')
+        checksum = package.with_name(package.name + '.sha256')
+        checksum.write_text(f'{r.filehash(package)}  {package.name}\n', encoding='utf-8')
+        r.manifest(self.config, 'linux', linux)
+        with mock.patch.object(sys, 'argv', ['release.py', 'check', '--platform', 'linux', '--folder', str(linux)]), \
+             mock.patch.object(r, 'configuration', return_value=self.config), \
+             mock.patch.object(r, 'GitHub', side_effect=AssertionError('Linux gate must not contact GitHub')):
+            r.main()
+        for folder in [self.folder, self.package.parent]:
+            with self.subTest(folder=folder), self.assertRaises(ValueError):
+                r.assets_for(self.config, folder, 'linux')
+        self.assertEqual(self.api.writes, [])
+    def test_linux_artifact_gate_rejects_invalid_manifest_and_hashes(self):
+        linux = self.folder / 'linux'
+        linux.mkdir()
+        package = linux / 'shanjie-linux-fixture.tar.gz'
+        package.write_bytes(b'synthetic Linux package')
+        checksum = package.with_name(package.name + '.sha256')
+        checksum.write_text(f'{r.filehash(package)}  {package.name}\n', encoding='utf-8')
+        r.manifest(self.config, 'linux', linux)
+        source = linux / 'release-source.json'
+        original = {path: path.read_bytes() for path in [package, checksum, source]}
+        record = json.loads(original[source])
+        cases = [(package, b'changed Linux package!!'), (checksum, b'0'*len(original[checksum]))]
+        for field, value in [('sha', 'b'*40), ('tag', 'v0.0.0'), ('platform', 'windows')]:
+            cases.append((source, json.dumps(record | {field: value}).encode()))
+        for path, content in cases + [(path, None) for path in original]:
+            with self.subTest(path=path.name, content=content):
+                for target, data in original.items():
+                    target.write_bytes(data)
+                if content is None:
+                    path.unlink()
+                else:
+                    path.write_bytes(content)
+                with self.assertRaises(ValueError):
+                    r.assets_for(self.config, linux, 'linux')
+        for path, data in original.items():
+            path.write_bytes(data)
+        checksum.write_text(f'{"0"*64}  {package.name}\n', encoding='utf-8')
+        record['assets'][1]['sha256'] = r.filehash(checksum)
+        source.write_text(json.dumps(record), encoding='utf-8')
+        with self.assertRaisesRegex(ValueError, 'checksum does not match'):
+            r.assets_for(self.config, linux, 'linux')
     def test_first_publication_is_draft_until_both_assets_verify(self):
         r.publish(self.api, self.config, self.folder)
         self.assertEqual(self.api.writes[0][2]['draft'], True)

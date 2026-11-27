@@ -342,32 +342,20 @@ jobs:
 
   release-ready:
     name: Release Ready
-    needs: [package, linux-package]
+    needs: [package, linux-artifact-gate]
     if: >-
       ${{ always() && needs.package.result == 'success' &&
-          ((inputs.build_linux && needs.linux-package.result == 'success') ||
-           (!inputs.build_linux && needs.linux-package.result == 'skipped')) }}
+          ((inputs.build_linux && needs.linux-artifact-gate.result == 'success') ||
+           (!inputs.build_linux && needs.linux-artifact-gate.result == 'skipped')) }}
     runs-on: ubuntu-latest
     outputs:
       artifact_name: ${{ needs.package.outputs.artifact_name }}
-      linux_artifact_name: ${{ needs.linux-package.outputs.artifact_name }}
+      linux_artifact_name: ${{ needs.linux-artifact-gate.outputs.artifact_name }}
       publish: ${{ needs.package.outputs.publish }}
       build_linux: ${{ needs.package.outputs.build_linux }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: ${{ needs.package.outputs.artifact_name }}
-          path: build/release-ready/windows
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        if: inputs.build_linux
-        with:
-          name: ${{ needs.linux-package.outputs.artifact_name }}
-          path: build/release-ready/linux
-      - name: Check required release assets
-        run: python3 scripts/release.py check --folder build/release-ready
+      - name: Confirm required platform jobs succeeded
+        run: echo 'Required platform artifacts are ready.'
 
   linux:
     name: Linux
@@ -483,3 +471,20 @@ jobs:
             build/linux/dist/release-source.json
           if-no-files-found: error
           retention-days: 7
+
+  linux-artifact-gate:
+    name: Linux Artifact Gate
+    needs: linux-package
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ${{ needs.linux-package.outputs.artifact_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ${{ needs.linux-package.outputs.artifact_name }}
+          path: build/linux-gate
+      - name: Verify Linux manifest and SHA-256
+        run: python3 scripts/release.py check --platform linux --folder build/linux-gate

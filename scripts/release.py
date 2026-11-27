@@ -110,7 +110,7 @@ def manifest(config, platform, folder):
             'assets': [{'name': p.name, 'size': p.stat().st_size, 'sha256': filehash(p)} for p in [package, checksum]]}
     (folder / 'release-source.json').write_text(json.dumps(data, indent=2) + '\n', encoding='utf-8')
 
-def assets_for(config, folder):
+def assets_for(config, folder, platform=None):
     files = {}
     platforms = set()
     for path in folder.rglob('release-source.json'):
@@ -136,7 +136,8 @@ def assets_for(config, folder):
         checksum = packages[0].with_name(packages[0].name + '.sha256')
         if checksum.read_text(encoding='utf-8-sig').strip() != f'{filehash(packages[0])}  {packages[0].name}':
             raise ValueError('Artifact checksum does not match its package')
-    if platforms != ({'windows', 'linux'} if config['build_linux'] else {'windows'}):
+    expected = {platform} if platform else ({'windows', 'linux'} if config['build_linux'] else {'windows'})
+    if platforms != expected:
         raise ValueError('Missing or unexpected platform artifacts')
     return files
 
@@ -193,8 +194,8 @@ def main():
         manifest(config, args.platform, args.folder)
         return
     if args.mode == 'check':
-        files = assets_for(config, args.folder)
-        print(f'Verified {len(files)} release assets from the required platforms')
+        files = assets_for(config, args.folder, args.platform)
+        print(f'Verified {len(files)} release assets from {args.platform or "the required platforms"}')
         return
     api = GitHub(os.environ['GITHUB_REPOSITORY'], os.environ['GH_TOKEN'])
     if args.mode == 'plan':
