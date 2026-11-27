@@ -116,9 +116,18 @@ $original=$record|ConvertTo-Json -Depth 15
 $proof=Assert-ReleaseAcceptance $fixture $reportPath
 if(!$proof.local_release_verified -or $proof.sha256 -cne $hash){throw 'A complete matching receipt should be accepted.'}
 $junitTime=(Get-Item -LiteralPath $reports[0].junit).LastWriteTimeUtc
+# A fresh Package runner has only build/ snapshots and receipts, without the
+# original build job's dist/. Keep that fixture recoverable under its own build/.
+$liveDist=[IO.Path]::GetFullPath((Join-Path $fixture 'dist'))
+$savedDist=[IO.Path]::GetFullPath((Join-Path $fixture 'build/dist-before-export'))
+$fixtureBoundary=[IO.Path]::GetFullPath($fixture)+[IO.Path]::DirectorySeparatorChar
+foreach($path in $liveDist,$savedDist){if(!$path.StartsWith($fixtureBoundary,[StringComparison]::OrdinalIgnoreCase)){throw 'Dist fixture move must remain inside the isolated test source.'}}
+Move-Item -LiteralPath $liveDist -Destination $savedDist
+if(Test-Path -LiteralPath $liveDist){throw 'Fresh export fixture must not have an existing dist directory.'}
 $null=Complete-ReleaseArtifact $fixture $reportPath
 $marker=Get-Content "$fixture/dist/release.json" -Raw|ConvertFrom-Json
 if(!$marker.local_release_verified -or $marker.installer_sha256 -cne $hash -or (Get-FileHash "$fixture/dist/Shanjie-Windows-Setup.exe").Hash.ToLowerInvariant() -cne $hash){throw 'Promotion must publish the exact accepted candidate and marker.'}
+Copy-ReleaseFiles $savedDist $liveDist
 $null=Complete-ReleaseArtifact $fixture
 if((Get-Item -LiteralPath $reports[0].junit).LastWriteTimeUtc -ne $junitTime){throw 'Receipt reuse must not rerun tests.'}
 

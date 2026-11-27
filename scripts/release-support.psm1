@@ -298,6 +298,7 @@ function Complete-ReleaseArtifact([string]$ProjectRoot,[string]$ReportPath,[swit
     # Validate the external receipt once, then promote that exact candidate.
     # Copy errors stay outside receipt discovery and never trigger another RELEASE.
     $setup=Join-Path $ProjectRoot 'dist/Shanjie-Windows-Setup.exe'
+    $null=New-Item -ItemType Directory -Path (Split-Path $setup -Parent) -Force
     Preserve-Output $setup
     Copy-Item -LiteralPath $accepted.installer -Destination $setup -Force
     if((Get-FileHash -LiteralPath $setup).Hash.ToLowerInvariant() -cne $accepted.sha256){throw 'Promoted installer does not match the verified candidate.'}
