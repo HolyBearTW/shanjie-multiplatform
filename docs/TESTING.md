@@ -48,7 +48,7 @@ Release Actions 主流程為 `Plan` → `Release` → `Publish`。`Release` 呼�
 
 Actions 中 `Windows x64/x86` 建置產品，`Windows Core` 準備核心測試執行檔；`CTest x64/x86` 執行各架構 CTest；`Core cap/mixed/share/latency` 是四個直接執行預編譯核心測試的分片；`CTest Merge` 核對分片證據；`CTest Package` 執行封裝驗證。四個分片依賴 `Snapshot`，上游工作完成後才會展開 matrix。快照 ID／SHA-256 由 verify 傳給 Merge，再傳給 Package；Merge 與 Package 依序執行，不加入僅為讀取輸出的 Snapshot 直連。`engine_cap` 獨立一片，其餘依 Run 45828667360 的實測成本分配；`engine_lm`、`engine_replay`、`engine_newword` 在同一 runner 依序以單行程、單執行緒執行，完成後才跑該片其他測試。分片不呼叫 Cargo；執行檔與相依 DLL 從 Cargo 回傳的實際路徑收集，上游編譯期 fixture 路徑要求各 job 使用相同 checkout 路徑。
 
-每片保存執行檔、來源、模型、fixture 與日誌雜湊，以及逐 binary 的實際結果。跨 job Artifact 由 `scripts/release_artifacts.py` 以 Python 標準庫封存／解封；解封快照後還原唯讀屬性，並由消費端核對原有 SHA-256。彙整時 `full.core-suite` 的 CTest delegate 核對四份收據、37 支唯一歸屬及逐斷言日誌，再由 CTest 寫出該邏輯項目的 JUnit。Rust 預期 panic 成功列的 `- should panic ... ok` 也按原斷言名稱核對，缺少、重複或失敗結果均會拒絕。雙架構 JUnit、完整子案例與同 commit／run／snapshot 證據全部通過後才簽發 packaging permit。Package job 重新核對 permit、同一快照與最終安裝檔 SHA-256。CI-safe 原有互動 UI 略過清單不變，產物仍只標示為 GitHub Actions artifact。
+每片保存執行檔、來源、模型、fixture 與日誌雜湊，以及逐 binary 的實際結果。跨 job Artifact 由 `scripts/release_artifacts.py` 以 Python 標準庫封存／解封；解封快照後還原唯讀屬性，並由消費端核對原有 SHA-256。彙整時 `full.core-suite` 的 CTest delegate 核對四份收據、37 支唯一歸屬及逐斷言日誌，再由 CTest 寫出該邏輯項目的 JUnit。Rust 預期 panic 成功列的 `- should panic ... ok` 也按原斷言名稱核對，缺少、重複或失敗結果均會拒絕。雙架構 JUnit、完整子案例與同 commit／run／snapshot 證據全部通過後才簽發 packaging permit。Package job 重新核對 permit、同一快照與最終安裝檔 SHA-256；匯出已驗收候選時會建立 `dist/` 輸出目錄，適用只有快照與收據的全新 Runner。CI-safe 原有互動 UI 略過清單不變，產物仍只標示為 GitHub Actions artifact。
 
 RELEASE 及 FULL 均重新執行必要核心斷言，不採用以前的 passed 結果；非正式 AFFECTED 才可依既有精確指紋收據重用，重型清單含 `engine_mixed`。Cargo 部分還原仍由 Cargo fingerprint 與產生來源收據重新驗證。WinUI 快取包含 SDK、全部來源／設定及輸出檔案雜湊；本輪原生 DLL 一律重新置入。
 
