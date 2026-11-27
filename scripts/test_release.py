@@ -336,7 +336,8 @@ class ReleaseTests(unittest.TestCase):
     def test_release_ready_requires_successful_required_package_jobs(self):
         workflow = (r.ROOT / '.github/workflows/release-platforms.yml').read_text(encoding='utf-8')
         ready = workflow.split('\n  release-ready:\n', 1)[1].split('\n  linux:\n', 1)[0]
-        self.assertIn('needs: [package, linux-artifact-gate]', ready)
+        needs = re.search(r'^    needs: \[(.+)\]$', ready, re.M)[1]
+        self.assertCountEqual([name.strip() for name in needs.split(',')], ['package', 'linux-artifact-gate'])
         gate = workflow.split('\n  linux-artifact-gate:\n', 1)[1]
         self.assertIn('needs: linux-manifest', gate)
         self.assertIn('scripts/release.py check --platform linux --folder build/linux-gate', gate)
@@ -370,7 +371,7 @@ class ReleaseTests(unittest.TestCase):
             levels.update(ready)
         self.assertEqual(levels['package'], 5)
         self.assertEqual(levels['linux-artifact-gate'], levels['package'])
-        self.assertEqual(dependencies['release-ready'], ['package', 'linux-artifact-gate'])
+        self.assertCountEqual(dependencies['release-ready'], ['package', 'linux-artifact-gate'])
         linux = {name for name in jobs if name.startswith('linux')}
         windows = set(jobs) - linux - {'release-ready'}
         for platform, other_platform in [(linux, windows), (windows, linux)]:

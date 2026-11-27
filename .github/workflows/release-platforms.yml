@@ -30,7 +30,7 @@ permissions:
 
 jobs:
   build-x64:
-    name: Build Win x64
+    name: Windows x64
     runs-on: windows-2025-vs2026
     timeout-minutes: 45
     defaults:
@@ -57,7 +57,7 @@ jobs:
           retention-days: 3
 
   build-x86:
-    name: Build Win x86
+    name: Windows x86
     runs-on: windows-2025-vs2026
     timeout-minutes: 45
     defaults:
@@ -84,7 +84,7 @@ jobs:
           retention-days: 3
 
   prepare-core:
-    name: Build Win Core
+    name: Windows Core
     runs-on: windows-2025-vs2026
     timeout-minutes: 45
     defaults:
@@ -292,7 +292,7 @@ jobs:
           retention-days: 7
 
   package:
-    name: Build Win Package
+    name: Windows Package
     needs: aggregate
     runs-on: windows-2025-vs2026
     timeout-minutes: 20
@@ -342,7 +342,7 @@ jobs:
 
   release-ready:
     name: Release Ready
-    needs: [package, linux-artifact-gate]
+    needs: [linux-artifact-gate, package]
     if: >-
       ${{ always() && needs.package.result == 'success' &&
           ((inputs.build_linux && needs.linux-artifact-gate.result == 'success') ||
