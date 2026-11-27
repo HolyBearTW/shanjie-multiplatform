@@ -23,13 +23,13 @@ if($Phase -eq 'Build'){
     $paths=@(if($Architecture -eq 'x64'){'dist'}else{'dist/x86'})+@("windows/target/$triple/release/shanjie_windows.lib","windows/target/$triple/release/shanjie-reliability-check.exe")
     @{schema=1;architecture=$Architecture;source=$identity;run_id=$env:GITHUB_RUN_ID;files=(Get-RelativeFileEntries -Root $root -Paths $paths -RequirePaths)} |
         ConvertTo-Json -Depth 10 | Set-Content "$parallel/build-$Architecture.json" -Encoding utf8NoBOM
-    & tar -cf "$parallel/build-$Architecture.tar" @paths "build/parallel/build-$Architecture.json"
+    & python "$PSScriptRoot/release_artifacts.py" pack "$parallel/build-$Architecture.tar" --root $root --paths @paths "build/parallel/build-$Architecture.json"
     if($LASTEXITCODE){throw 'Cannot archive release build inputs.'}
     return
 }
 if($Phase -eq 'PrepareCore'){
     & "$PSScriptRoot/test-core.ps1" -PrepareOnly -BundleRoot "$parallel/core-bundle"
-    & tar -cf "$parallel/core-bundle.tar" -C $parallel core-bundle
+    & python "$PSScriptRoot/release_artifacts.py" pack "$parallel/core-bundle.tar" --root $parallel --paths core-bundle
     if($LASTEXITCODE){throw 'Cannot archive prepared core tests.'}
     return
 }
@@ -44,7 +44,7 @@ if($Phase -eq 'Seal'){
     $snapshot=New-ReleaseSnapshot $root ([guid]::NewGuid().ToString('N')) $identity "$parallel/core-bundle"
     "snapshot_id=$($snapshot.id)" >> $env:GITHUB_OUTPUT
     "snapshot_sha256=$($snapshot.sha256)" >> $env:GITHUB_OUTPUT
-    & tar -cf "$parallel/snapshot.tar" -C "$root/build/release-snapshots" $snapshot.id
+    & python "$PSScriptRoot/release_artifacts.py" pack "$parallel/snapshot.tar" --root "$root/build/release-snapshots" --paths $snapshot.id
     if($LASTEXITCODE){throw 'Cannot archive sealed snapshot.'}
     return
 }
@@ -53,13 +53,13 @@ if($snapshot.source.commit -cne $identity.commit -or $snapshot.source.version -c
 $evidence=Join-Path $root "build/reports/release-parallel-$SnapshotId"
 if($Phase -eq 'Verify'){
     & "$PSScriptRoot/test.ps1" -Level RELEASE -BaseRef HEAD -CiSafe -ReleaseVerify -Architecture $Architecture -SnapshotId $SnapshotId -SnapshotHash $SnapshotHash -ReportDirectory "$evidence/verify-$Architecture"
-    & tar -cf "$parallel/verify-$Architecture.tar" -C $root "build/reports/release-parallel-$SnapshotId/verify-$Architecture"
+    & python "$PSScriptRoot/release_artifacts.py" pack "$parallel/verify-$Architecture.tar" --root $root --paths "build/reports/release-parallel-$SnapshotId/verify-$Architecture"
     if($LASTEXITCODE){throw 'Cannot archive architecture verification evidence.'}
     return
 }
 if($Phase -eq 'Shard'){
     & "$PSScriptRoot/test-core.ps1" -Shard $Shard -SnapshotId $SnapshotId -SnapshotHash $SnapshotHash -ReceiptRoot "$evidence/core/$Shard"
-    & tar -cf "$parallel/core-$Shard.tar" -C $root "build/reports/release-parallel-$SnapshotId/core/$Shard"
+    & python "$PSScriptRoot/release_artifacts.py" pack "$parallel/core-$Shard.tar" --root $root --paths "build/reports/release-parallel-$SnapshotId/core/$Shard"
     if($LASTEXITCODE){throw 'Cannot archive core shard evidence.'}
     return
 }
@@ -103,7 +103,7 @@ if($Phase -eq 'Aggregate'){
         parallel=@{run_id=$env:GITHUB_RUN_ID;core_evidence="$evidence/core";verification=$verification};
         release=@{source_start=$identity;source_end=$identity;architectures=@('x64','x86');candidate_id=$snapshot.id;snapshot_sha256=$snapshot.sha256}}
     $null=New-ReleasePackagingPermit $root $permitPath $permitRecord
-    & tar -cf "$parallel/evidence.tar" -C $root "build/reports/release-parallel-$SnapshotId"
+    & python "$PSScriptRoot/release_artifacts.py" pack "$parallel/evidence.tar" --root $root --paths "build/reports/release-parallel-$SnapshotId"
     if($LASTEXITCODE){throw 'Cannot archive accepted release evidence.'}
     return
 }

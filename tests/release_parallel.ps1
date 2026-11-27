@@ -33,20 +33,49 @@ foreach($path in $paths){
 if($LASTEXITCODE){throw 'Cannot commit parallel release fixture.'}
 $identity=Get-ReleaseIdentity $FixtureRoot
 $bundle=Join-Path $FixtureRoot 'build/parallel-core-fixture'
-$null=New-Item -ItemType Directory -Path "$bundle/test/core/target/release/deps","$bundle/test/data/lm","$bundle/test/eval" -Force
-[IO.File]::WriteAllText("$bundle/test/data/lm/model",'synthetic model')
-[IO.File]::WriteAllText("$bundle/test/eval/table",'synthetic evaluation data')
+$tree=Join-Path $FixtureRoot 'build/test/core'
+$resources=Join-Path $FixtureRoot 'build/parallel-fixture-resources'
+$models=Join-Path $FixtureRoot 'build/parallel-fixture-models'
+# Match Cargo's target-qualified layout rather than the old hard-coded directory.
+$compiled=Join-Path $FixtureRoot 'build/core-executables/x86_64-pc-windows-msvc/release/deps'
+$null=New-Item -ItemType Directory -Path "$tree/src","$tree/tests","$resources/data","$resources/eval","$resources/docs",$models,$compiled -Force
+foreach($file in 'Cargo.toml','Cargo.lock','src/lib.rs','tests/fixture.rs'){[IO.File]::WriteAllText("$tree/$file",'synthetic generated core input')}
+[IO.File]::WriteAllText("$resources/data/table",'synthetic dictionary')
+[IO.File]::WriteAllText("$resources/eval/table",'synthetic evaluation data')
+[IO.File]::WriteAllText("$resources/docs/spec",'synthetic specification')
+[IO.File]::WriteAllText("$models/model",'synthetic model')
+[IO.File]::WriteAllText("$compiled/core-test-fixture.dll",'synthetic runtime dependency')
 $binaries=@(foreach($name in $names){
-    $relative="test/core/target/release/deps/$name.cmd"
-    [IO.File]::WriteAllText("$bundle/$relative","@echo off`r`nif `"%SHANJIE_SYNTHETIC_CORE_FAIL%`"==`"$name`" exit /b 1`r`necho running 1 test`r`necho test sample ... ok`r`necho test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`r`nexit /b 0`r`n")
-    @{name=$name;executable=$relative;cases=@('sample')}
+    $exe=Join-Path $compiled "$name.cmd"
+    [IO.File]::WriteAllText($exe,"@echo off`r`nif `"%1`"==`"--list`" goto list`r`nif `"%SHANJIE_SYNTHETIC_CORE_FAIL%`"==`"$name`" exit /b 1`r`necho running 1 test`r`necho test sample ... ok`r`necho test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out`r`nexit /b 0`r`n:list`r`necho sample: test`r`nexit /b 0`r`n")
+    [pscustomobject]@{Name=$name;Path=$exe}
 })
-$bundleRecord=@{schema=1;commit=$identity.commit;source_fingerprint=(Get-CoreSourceFingerprint $FixtureRoot);source_key='a'*64;
-    manifest_directory=(Join-Path $FixtureRoot 'build/test/core');skip_arguments=@();binaries=$binaries;shards=$plans;
-    files=(Get-RelativeFileEntries -Root $bundle -Paths @('test') -RequirePaths)}
-$bundleRecord | ConvertTo-Json -Depth 12 | Set-Content "$bundle/bundle.json" -Encoding utf8NoBOM
+New-CoreTestBundle $FixtureRoot $bundle $binaries $resources $models ('a'*64) @()
+$prepared=Assert-CoreTestBundle $FixtureRoot $bundle
+if($prepared.binaries.Count -ne 37 -or !$prepared.files.ContainsKey('test/core/target/release/deps/core-test-fixture.dll') -or
+    (Get-FileHash "$bundle/test/core/target/release/deps/core-test-fixture.dll").Hash -cne (Get-FileHash "$compiled/core-test-fixture.dll").Hash){throw 'Prepared bundle lost Cargo-discovered executables or runtime dependencies.'}
 foreach($triple in 'x86_64-pc-windows-msvc','i686-pc-windows-msvc'){
     [IO.File]::WriteAllText("$FixtureRoot/windows/target/$triple/release/shanjie-reliability-check.exe",'synthetic probe')
+}
+$tokens=$null;$parseErrors=$null
+$driver=[Management.Automation.Language.Parser]::ParseFile("$project/scripts/release-pipeline.ps1",[ref]$tokens,[ref]$parseErrors)
+$packCommand=$driver.Find({param($node) $node -is [Management.Automation.Language.CommandAst] -and $node.Extent.Text.Contains('"$parallel/build-$Architecture.tar"')},$true)
+$packAction=[scriptblock]::Create($packCommand.Extent.Text.Replace('$PSScriptRoot','$project/scripts'))
+$root=$FixtureRoot;$parallel=Join-Path $FixtureRoot 'build/parallel'
+$null=New-Item -ItemType Directory -Path $parallel -Force
+foreach($Architecture in 'x64','x86'){
+    $triple=if($Architecture -eq 'x64'){'x86_64-pc-windows-msvc'}else{'i686-pc-windows-msvc'}
+    $paths=@(if($Architecture -eq 'x64'){'dist'}else{'dist/x86'})+@("windows/target/$triple/release/shanjie_windows.lib","windows/target/$triple/release/shanjie-reliability-check.exe")
+    [IO.File]::WriteAllText("$parallel/build-$Architecture.json",'synthetic build receipt')
+    & $packAction
+    if($LASTEXITCODE){throw "Actual $Architecture archive command failed."}
+    $restored=Join-Path $parallel "restored-$Architecture"
+    & python "$project/scripts/release_artifacts.py" unpack "$parallel/build-$Architecture.tar" --root $restored
+    if($LASTEXITCODE){throw 'Build artifact extraction failed.'}
+    $archiveInputs=$paths+@("build/parallel/build-$Architecture.json")
+    $expectedFiles=Get-RelativeFileEntries -Root $FixtureRoot -Paths $archiveInputs -RequirePaths
+    $restoredFiles=Get-RelativeFileEntries -Root $restored -Paths $archiveInputs -RequirePaths
+    Assert-ReleaseFileMap $expectedFiles $restoredFiles "Transported $Architecture build artifacts"
 }
 $snapshot=New-ReleaseSnapshot $FixtureRoot ([guid]::NewGuid().ToString('N')) $identity $bundle
 $receiptRoot=Join-Path $FixtureRoot "build/reports/parallel-fixture-$($snapshot.id)"

@@ -66,7 +66,9 @@ function New-CoreTestBundle([string]$ProjectRoot,[string]$Destination,[object[]]
         @{name=$binary.Name;executable=$relative;cases=$cases}
     })
     # rustc's runtime dependencies, if the selected toolchain emitted any.
-    foreach($file in Get-ChildItem "$tree/target/release/deps" -Filter *.dll){Copy-ReleaseFiles $file.FullName "$Destination/test/core/target/release/deps/$($file.Name)"}
+    foreach($directory in $Binaries.Path | ForEach-Object {Split-Path $_ -Parent} | Sort-Object -Unique){
+        foreach($file in Get-ChildItem -LiteralPath $directory -Filter *.dll){Copy-ReleaseFiles $file.FullName "$Destination/test/core/target/release/deps/$($file.Name)"}
+    }
     $names=Get-CoreTestNames $ProjectRoot
     if(@($rows).Count -ne $names.Count -or @(Compare-Object $names @($rows.name)).Count){throw 'Cargo did not prepare the complete upstream core inventory.'}
     $record=[ordered]@{schema=1;commit=(& git -C $ProjectRoot rev-parse HEAD);source_fingerprint=(Get-CoreSourceFingerprint $ProjectRoot);

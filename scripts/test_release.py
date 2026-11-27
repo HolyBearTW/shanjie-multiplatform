@@ -1,6 +1,57 @@
 """Release transactions against an in-memory GitHub API; never contacts GitHub."""
-import copy, json, pathlib, shutil, tempfile, unittest
+import copy, io, json, pathlib, shutil, tarfile, tempfile, unittest
 import release as r
+import release_artifacts as artifacts
+
+
+class ReleaseArtifactTests(unittest.TestCase):
+    def test_round_trip_preserves_unicode_spaces_and_binary_hashes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            source, output = root / 'source tree', root / 'restored tree'
+            paths = ['dist/setup/安裝善解.exe', 'dist/ui/語系 file.dll',
+                     'dist/data/models/builtin/model', 'native/x64/shanjie_windows.lib',
+                     'build/parallel/build-x64.json']
+            expected = {}
+            for index, name in enumerate(paths):
+                file = source / name
+                file.parent.mkdir(parents=True, exist_ok=True)
+                file.write_bytes(bytes(range(256)) * (index + 1))
+                expected[name] = r.filehash(file)
+            archive = root / 'release inputs.tar'
+            artifacts.main(['pack', str(archive), '--root', str(source), '--paths',
+                            'dist', 'native', 'build/parallel/build-x64.json'])
+            artifacts.main(['unpack', str(archive), '--root', str(output)])
+            actual = {file.relative_to(output).as_posix(): r.filehash(file)
+                      for file in output.rglob('*') if file.is_file()}
+            self.assertEqual(actual, expected)
+
+    def test_missing_build_input_fails_the_archive(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            with self.assertRaises(FileNotFoundError):
+                artifacts.main(['pack', str(root / 'inputs.tar'), '--root', str(root),
+                                '--paths', 'missing.dll'])
+
+    def test_invalid_archive_cannot_be_extracted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            archive = root / 'inputs.tar'
+            archive.write_bytes(b'not a release archive')
+            with self.assertRaises(tarfile.ReadError):
+                artifacts.main(['unpack', str(archive), '--root', str(root / 'output')])
+
+    def test_archive_cannot_write_outside_the_artifact_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            archive = root / 'inputs.tar'
+            with tarfile.open(archive, 'w') as bundle:
+                entry = tarfile.TarInfo('../outside.txt')
+                entry.size = 7
+                bundle.addfile(entry, io.BytesIO(b'outside'))
+            with self.assertRaises(tarfile.OutsideDestinationError):
+                artifacts.main(['unpack', str(archive), '--root', str(root / 'output')])
+            self.assertFalse((root / 'outside.txt').exists())
 
 class FakeGitHub:
     def __init__(self):

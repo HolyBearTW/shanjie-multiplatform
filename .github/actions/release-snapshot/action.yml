@@ -15,5 +15,6 @@ runs:
       shell: pwsh
       run: |
         New-Item -ItemType Directory -Path build/release-snapshots -Force | Out-Null
-        tar -xf build/parallel/snapshot-download/snapshot.tar -C build/release-snapshots
+        python scripts/release_artifacts.py unpack build/parallel/snapshot-download/snapshot.tar --root build/release-snapshots
         if ($LASTEXITCODE) { throw 'Snapshot extraction failed.' }
+        Get-ChildItem build/release-snapshots -File -Recurse | ForEach-Object { $_.IsReadOnly = $true }
