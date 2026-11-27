@@ -1,4 +1,4 @@
-# Windows 驗收流程
+# Windows 與 Linux 驗收流程
 
 `full.core.learning-status.x64`、`full.core.privacy.x64` 及對應的 x86 RELEASE 案例以隔離檔案驗證 local／pipe 學習失敗、恢復、明確關閉及隱私暫停。`private.tsf-compat` 的 `privacy-*` 用啟用前文的普通欄位做正向控制，確認前文查詢發生於第一次組字寫入前。同一階段在關閉前文、private、password 與 PIN 案例須為零讀取，隱私案例另驗證零學習寫入。組字後 TSF 自身的讀取次數另行記錄。`modifiers-*` 使用 `SetKeyboardState` 加真實 TSF callback；`range-refresh` 記錄未變文字重寫及最終組字結果。均不代表前景 App 或實體鍵盤已驗收。
 
@@ -46,11 +46,19 @@ PR 指向 main 時，開啟、更新提交與重新開啟會跑輕量 CI；`work
 
 Release Actions 主流程為 `Plan` → `Release` → `Publish`。`Release` 呼叫 `release-platforms.yml`，整合 Windows 平行流程與選用的 Linux Job；Linux 放在該子流程定義的最後，保留與 Windows 建置平行執行的關係，實際圖表位置由 GitHub 排版。`mode` 預設 `verify`，不提供 legacy 或 `pipeline` 選項。Windows 同時建置 x64、x86 與完整 37 支核心測試執行檔，驗證建置收據後封存共同 snapshot，再平行執行雙架構 CTest 與四個核心 shard。Linux 沿用 `RELEASE-CHANNEL.json` 的 `build_linux` 開關及既有 Fedora 封裝流程；啟用時，兩平台全部成功才允許發布。
 
-Actions 中 `Build Core` 準備核心測試執行檔；`CTest x64/x86` 執行各架構 CTest；`Core cap/mixed/share/latency` 是四個直接執行預編譯核心測試的分片；`CTest Merge` 核對分片證據；`CTest Package` 執行封裝驗證。四個分片依賴 `Snapshot`，上游工作完成後才會展開 matrix。`engine_cap` 獨立一片，其餘依 Run 45828667360 的實測成本分配；`engine_lm`、`engine_replay`、`engine_newword` 在同一 runner 依序以單行程、單執行緒執行，完成後才跑該片其他測試。分片不呼叫 Cargo；執行檔與相依 DLL 從 Cargo 回傳的實際路徑收集，上游編譯期 fixture 路徑要求各 job 使用相同 checkout 路徑。
+Actions 中 `Windows x64/x86` 建置產品，`Windows Core` 準備核心測試執行檔；`CTest x64/x86` 執行各架構 CTest；`Core cap/mixed/share/latency` 是四個直接執行預編譯核心測試的分片；`CTest Merge` 核對分片證據；`CTest Package` 執行封裝驗證。四個分片依賴 `Snapshot`，上游工作完成後才會展開 matrix。`engine_cap` 獨立一片，其餘依 Run 45828667360 的實測成本分配；`engine_lm`、`engine_replay`、`engine_newword` 在同一 runner 依序以單行程、單執行緒執行，完成後才跑該片其他測試。分片不呼叫 Cargo；執行檔與相依 DLL 從 Cargo 回傳的實際路徑收集，上游編譯期 fixture 路徑要求各 job 使用相同 checkout 路徑。
 
 每片保存執行檔、來源、模型、fixture 與日誌雜湊，以及逐 binary 的實際結果。跨 job Artifact 由 `scripts/release_artifacts.py` 以 Python 標準庫封存／解封；解封快照後還原唯讀屬性，並由消費端核對原有 SHA-256。彙整時 `full.core-suite` 的 CTest delegate 核對四份收據、37 支唯一歸屬及逐斷言日誌，再由 CTest 寫出該邏輯項目的 JUnit。雙架構 JUnit、完整子案例與同 commit／run／snapshot 證據全部通過後才簽發 packaging permit。Package job 重新核對 permit、同一快照與最終安裝檔 SHA-256。CI-safe 原有互動 UI 略過清單不變，產物仍只標示為 GitHub Actions artifact。
 
 RELEASE 及 FULL 均重新執行必要核心斷言，不採用以前的 passed 結果；非正式 AFFECTED 才可依既有精確指紋收據重用，重型清單含 `engine_mixed`。Cargo 部分還原仍由 Cargo fingerprint 與產生來源收據重新驗證。WinUI 快取包含 SDK、全部來源／設定及輸出檔案雜湊；本輪原生 DLL 一律重新置入。
+
+### Linux 發布基本測試
+
+Linux Job 只在 `build_linux=true` 時執行。`linux/scripts/package.sh` 建置安裝樹後，先呼叫 `linux/scripts/test.sh <安裝樹>`，通過後才建立 `.tar.gz` 與校驗檔；CTest 失敗會阻止封存、產物上傳與發布。Windows 的固定 CI 與 FULL／RELEASE 清冊不變。
+
+Linux 清冊由 `linux/tests/CMakeLists.txt` 管理，包含 shared、Linux common、IBus、settings 四組 Cargo 單元測試，以及 `linux/tests/scenarios/` 的八個既有 IBus 情境。Cargo 使用鎖定依賴與 release profile，不執行上游 37 支重型核心測試或標示為 ignored 的線上測試。CTest 依序執行並於失敗時停止；IBus 情境以安裝樹內的引擎與資料，在私人 D-Bus／IBus 與獨立 XDG profile 執行。
+
+報告保存在 `build/reports/linux-*/junit.xml` 與 `ctest.log`，Actions 無論測試成功或失敗都上傳。這是基本單元與隔離 IBus 驗收，不代表實際 GNOME 桌面、設定視窗操作或安裝／解除安裝已驗收。本機沒有 Linux 執行環境時，僅認列腳本語法、CTest 清冊及封裝失敗門控的合成測試。
 
 直接使用 CTest：
 
@@ -236,7 +244,8 @@ CTest 與核心測試統一採用「上次失敗優先，其次耗時較長優�
 
 | 環境 | 可驗證內容 |
 | --- | --- |
-| Codex Cloud Linux | PowerShell 語法解析、選測規則、檔案／mock 框架自檢、Python 發布交易單元測試與 JSON/YAML 靜態檢查；不執行產品建置或新增 Linux 驗收流程，不能宣稱 MSVC、WinUI、TSF、x64／x86 或 RELEASE 通過 |
+| Codex Cloud Linux | PowerShell 語法解析、選測規則、檔案／mock 框架自檢、Python 發布交易單元測試與 JSON/YAML 靜態檢查；缺少 Fedora 發布依賴時僅認列靜態及合成結果，不能宣稱 MSVC、WinUI、TSF、x64／x86 或 RELEASE 通過 |
+| Linux 發布環境（Fedora 44） | 四組 Cargo 單元測試、八個隔離 IBus 情境與封裝／雜湊檢查；由 `build_linux` 控制，不代表完整 GNOME 桌面或實際安裝驗收 |
 | GitHub Actions Windows | PR 與手動 ci 固定跑 CI 基線；不建置 WinUI 或產品。既有 Release job 才跑 RELEASE -CiSafe，略過的互動項目列為未執行，須本機補驗 |
 | Windows 本機 | FAST、AFFECTED、FULL、RELEASE 全部實際 Windows 測試；WinUI 驗收與候選 host 可使用本機 Windows／SDK |
 
@@ -260,7 +269,7 @@ RELEASE 收據 schema 4 保存驗收前後原始碼身分、固定快照、雙�
 
 GitHub Actions 的 Release job 跑 `RELEASE -CiSafe` 並匯出 CI artifact。x64 和 x86 的 Cargo 產物各有獨立的鍵與路徑，兩個架構共用 registry 與 host 套件。產物依 Rust、MSVC、Windows SDK、編譯設定及來源選擇快取，registry 可跨工具鏈版本還原。Cargo 指紋、core overlay 收據及模型雜湊會核對還原內容。NuGet 及內建模型轉換產物也有快取。x64 的發布建置與測試使用 Thin LTO 與 8 個 codegen units，x86 沿用 Fat LTO 與 1 個 codegen unit。Windows Rust 單元與混打回歸共用各自架構的測試執行檔，快取身分斷言仍在獨立程序執行。互動驗收另依本機 RELEASE 清冊執行。
 
-遠端發布保留上游 #86 的 `scripts/release.py`：先檢查平台產物、來源 manifest 與 SHA-256；只續作同來源草稿，發布過的 Release 不覆寫，artifact 名稱包含 run attempt。這套遠端發布交易與本機完整驗收收據各自保留原有防護，不用 CI-safe 產物冒充本機 RELEASE。既有 Linux 發布 job 原樣保留，本次未新增 Linux 工作。
+遠端發布保留上游 #86 的 `scripts/release.py`：先檢查平台產物、來源 manifest 與 SHA-256；只續作同來源草稿，發布過的 Release 不覆寫，artifact 名稱包含 run attempt。這套遠端發布交易與本機完整驗收收據各自保留原有防護，不用 CI-safe 產物冒充本機 RELEASE。Linux 發布沿用既有容器、產物與平台開關，封存前先跑基本 CTest。
 
 ## 新舊耗時比較
 
