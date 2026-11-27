@@ -335,11 +335,9 @@ class ReleaseTests(unittest.TestCase):
             r.assets_for(self.config, self.folder)
     def test_release_ready_requires_successful_required_package_jobs(self):
         workflow = (r.ROOT / '.github/workflows/release-platforms.yml').read_text(encoding='utf-8')
-        sections = re.split(r'^  ([a-z][a-z0-9-]*):\n', workflow.split('\njobs:\n', 1)[1], flags=re.M)
-        jobs = dict(zip(sections[1::2], sections[2::2]))
-        ready = jobs['release-ready']
+        ready = workflow.split('\n  release-ready:\n', 1)[1].split('\n  linux:\n', 1)[0]
         self.assertIn('needs: [package, linux-artifact-gate]', ready)
-        gate = jobs['linux-artifact-gate']
+        gate = workflow.split('\n  linux-artifact-gate:\n', 1)[1]
         self.assertIn('needs: linux-manifest', gate)
         self.assertIn('scripts/release.py check --platform linux --folder build/linux-gate', gate)
         self.assertIn('needs.linux-artifact-gate.outputs.artifact_name', ready)
