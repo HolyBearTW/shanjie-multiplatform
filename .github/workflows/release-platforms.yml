@@ -14,16 +14,16 @@ on:
     outputs:
       artifact_name:
         description: Verified Windows installer artifact
-        value: ${{ jobs.package.outputs.artifact_name }}
+        value: ${{ jobs.release-ready.outputs.artifact_name }}
       linux_artifact_name:
         description: Verified Linux package artifact when enabled
-        value: ${{ jobs.linux-package.outputs.artifact_name }}
+        value: ${{ jobs.release-ready.outputs.linux_artifact_name }}
       publish:
-        description: Publication decision after successful Windows acceptance
-        value: ${{ jobs.package.outputs.publish }}
+        description: Publication decision after release readiness
+        value: ${{ jobs.release-ready.outputs.publish }}
       build_linux:
         description: Whether Linux assets are required
-        value: ${{ jobs.package.outputs.build_linux }}
+        value: ${{ jobs.release-ready.outputs.build_linux }}
 
 permissions:
   contents: read
@@ -339,6 +339,35 @@ jobs:
             dist/release-source.json
           if-no-files-found: error
           retention-days: 7
+
+  release-ready:
+    name: Release Ready
+    needs: [package, linux-package]
+    if: >-
+      ${{ always() && needs.package.result == 'success' &&
+          ((inputs.build_linux && needs.linux-package.result == 'success') ||
+           (!inputs.build_linux && needs.linux-package.result == 'skipped')) }}
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: ${{ needs.package.outputs.artifact_name }}
+      linux_artifact_name: ${{ needs.linux-package.outputs.artifact_name }}
+      publish: ${{ needs.package.outputs.publish }}
+      build_linux: ${{ needs.package.outputs.build_linux }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ${{ needs.package.outputs.artifact_name }}
+          path: build/release-ready/windows
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        if: inputs.build_linux
+        with:
+          name: ${{ needs.linux-package.outputs.artifact_name }}
+          path: build/release-ready/linux
+      - name: Check required release assets
+        run: python3 scripts/release.py check --folder build/release-ready
 
   linux:
     name: Linux

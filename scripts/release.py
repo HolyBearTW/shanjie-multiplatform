@@ -182,7 +182,7 @@ def publish(api, config, folder):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=['plan', 'manifest', 'publish'])
+    parser.add_argument('mode', choices=['plan', 'manifest', 'check', 'publish'])
     parser.add_argument('--root', type=pathlib.Path, default=ROOT)
     parser.add_argument('--folder', type=pathlib.Path)
     parser.add_argument('--platform', choices=['windows', 'linux'])
@@ -191,6 +191,10 @@ def main():
     config = configuration(args.root, os.environ.get('GITHUB_SHA', ''))
     if args.mode == 'manifest':
         manifest(config, args.platform, args.folder)
+        return
+    if args.mode == 'check':
+        files = assets_for(config, args.folder)
+        print(f'Verified {len(files)} release assets from the required platforms')
         return
     api = GitHub(os.environ['GITHUB_REPOSITORY'], os.environ['GH_TOKEN'])
     if args.mode == 'plan':

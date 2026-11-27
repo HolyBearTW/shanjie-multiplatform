@@ -1,5 +1,6 @@
 """Release transactions against an in-memory GitHub API; never contacts GitHub."""
-import copy, io, json, os, pathlib, shutil, subprocess, sys, tarfile, tempfile, unittest
+import copy, io, json, os, pathlib, re, shutil, subprocess, sys, tarfile, tempfile, unittest
+from unittest import mock
 import release as r
 import release_artifacts as artifacts
 
@@ -294,6 +295,61 @@ class ReleaseTests(unittest.TestCase):
     def test_verify_does_not_contact_or_mutate_github(self):
         self.api.request = lambda *args: self.fail('verify mode contacted GitHub')
         self.assertFalse(r.plan(self.api, self.config, True))
+    def test_check_assets_does_not_construct_a_github_client(self):
+        with mock.patch.object(sys, 'argv', ['release.py', 'check', '--folder', str(self.folder)]), \
+             mock.patch.object(r, 'configuration', return_value=self.config), \
+             mock.patch.object(r, 'GitHub', side_effect=AssertionError('Asset readiness must not contact GitHub')):
+            r.main()
+        self.assertEqual(self.api.writes, [])
+    def test_check_assets_requires_enabled_linux_and_matching_source(self):
+        self.config['build_linux'] = True
+        with self.assertRaises(ValueError):
+            r.assets_for(self.config, self.folder)
+        linux = self.folder / 'linux'
+        linux.mkdir()
+        package = linux / 'shanjie-linux-fixture.tar.gz'
+        package.write_bytes(b'synthetic Linux package')
+        checksum = package.with_name(package.name + '.sha256')
+        checksum.write_text(f'{r.filehash(package)}  {package.name}\n', encoding='utf-8')
+        r.manifest(self.config, 'linux', linux)
+        self.assertEqual(len(r.assets_for(self.config, self.folder)), 4)
+        source = linux / 'release-source.json'
+        record = json.loads(source.read_text(encoding='utf-8'))
+        record['sha'] = 'b'*40
+        source.write_text(json.dumps(record), encoding='utf-8')
+        with self.assertRaises(ValueError):
+            r.assets_for(self.config, self.folder)
+    def test_check_assets_rejects_changed_packages_and_unexpected_linux(self):
+        self.package.write_bytes(b'changed after packaging')
+        with self.assertRaises(ValueError):
+            r.assets_for(self.config, self.folder)
+        self.package.write_bytes(b'public installer fixture')
+        linux = self.folder / 'linux'
+        linux.mkdir()
+        package = linux / 'shanjie-linux-fixture.tar.gz'
+        package.write_bytes(b'synthetic Linux package')
+        checksum = package.with_name(package.name + '.sha256')
+        checksum.write_text(f'{r.filehash(package)}  {package.name}\n', encoding='utf-8')
+        r.manifest(self.config, 'linux', linux)
+        with self.assertRaises(ValueError):
+            r.assets_for(self.config, self.folder)
+    def test_release_ready_requires_successful_required_package_jobs(self):
+        workflow = (r.ROOT / '.github/workflows/release-platforms.yml').read_text(encoding='utf-8')
+        ready = workflow.split('\n  release-ready:\n', 1)[1].split('\n  linux:\n', 1)[0]
+        self.assertIn('needs: [package, linux-package]', ready)
+        self.assertIn('scripts/release.py check --folder build/release-ready', ready)
+        raw = re.search(r'    if: >-\n((?:      .*\n)+)', ready).group(1).strip()
+        expression = ' '.join(raw.removeprefix('${{').removesuffix('}}').split())
+        expression = expression.replace('always()', 'True').replace('inputs.build_linux', 'linux_enabled')
+        expression = expression.replace('needs.package.result', 'windows_result').replace('needs.linux-package.result', 'linux_result')
+        expression = expression.replace('&&', ' and ').replace('||', ' or ').replace('!', ' not ')
+        for linux_enabled in [False, True]:
+            for windows_result in ['success', 'failure', 'cancelled', 'skipped']:
+                for linux_result in ['success', 'failure', 'cancelled', 'skipped']:
+                    expected = windows_result == 'success' and linux_result == ('success' if linux_enabled else 'skipped')
+                    with self.subTest(linux=linux_enabled, windows=windows_result, result=linux_result):
+                        self.assertEqual(eval(expression, {'__builtins__': {}}, {
+                            'linux_enabled': linux_enabled, 'windows_result': windows_result, 'linux_result': linux_result}), expected)
     def test_first_publication_is_draft_until_both_assets_verify(self):
         r.publish(self.api, self.config, self.folder)
         self.assertEqual(self.api.writes[0][2]['draft'], True)
