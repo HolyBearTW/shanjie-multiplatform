@@ -338,7 +338,7 @@ class ReleaseTests(unittest.TestCase):
         ready = workflow.split('\n  release-ready:\n', 1)[1].split('\n  linux:\n', 1)[0]
         self.assertIn('needs: [package, linux-artifact-gate]', ready)
         gate = workflow.split('\n  linux-artifact-gate:\n', 1)[1]
-        self.assertIn('needs: linux-package', gate)
+        self.assertIn('needs: linux-manifest', gate)
         self.assertIn('scripts/release.py check --platform linux --folder build/linux-gate', gate)
         self.assertIn('needs.linux-artifact-gate.outputs.artifact_name', ready)
         raw = re.search(r'    if: >-\n((?:      .*\n)+)', ready).group(1).strip()
@@ -353,6 +353,35 @@ class ReleaseTests(unittest.TestCase):
                     with self.subTest(linux=linux_enabled, windows=windows_result, result=linux_result):
                         self.assertEqual(eval(expression, {'__builtins__': {}}, {
                             'linux_enabled': linux_enabled, 'windows_result': windows_result, 'linux_result': linux_result}), expected)
+    def test_platform_endpoints_have_equal_depth_and_remain_independent(self):
+        workflow = (r.ROOT / '.github/workflows/release-platforms.yml').read_text(encoding='utf-8')
+        sections = re.split(r'^  ([a-z][a-z0-9-]*):\n', workflow.split('\njobs:\n', 1)[1], flags=re.M)
+        jobs = dict(zip(sections[1::2], sections[2::2]))
+        dependencies = {}
+        for name, body in jobs.items():
+            match = re.search(r'^    needs: (.+)$', body, re.M)
+            dependencies[name] = [job.strip() for job in match[1].strip('[]').split(',')] if match else []
+        levels = {}
+        while len(levels) < len(jobs):
+            ready = {name: 1 + max((levels[parent] for parent in parents), default=0)
+                     for name, parents in dependencies.items()
+                     if name not in levels and all(parent in levels for parent in parents)}
+            self.assertTrue(ready, 'Workflow dependencies must be complete and acyclic')
+            levels.update(ready)
+        self.assertEqual(levels['package'], 5)
+        self.assertEqual(levels['linux-artifact-gate'], levels['package'])
+        self.assertEqual(dependencies['release-ready'], ['package', 'linux-artifact-gate'])
+        linux = {name for name in jobs if name.startswith('linux')}
+        windows = set(jobs) - linux - {'release-ready'}
+        for platform, other_platform in [(linux, windows), (windows, linux)]:
+            for name in platform:
+                with self.subTest(job=name):
+                    self.assertFalse(set(dependencies[name]) & other_platform)
+        manifest = jobs['linux-manifest']
+        self.assertEqual(dependencies['linux-manifest'], ['linux-package'])
+        self.assertIn('scripts/release.py manifest --platform linux', manifest)
+        self.assertIn('needs.linux-package.outputs.artifact_name', manifest)
+        self.assertIn('needs.linux-manifest.outputs.artifact_name', jobs['linux-artifact-gate'])
     def test_linux_artifact_gate_checks_only_linux_without_github(self):
         self.config['build_linux'] = True
         linux = self.folder / 'linux'

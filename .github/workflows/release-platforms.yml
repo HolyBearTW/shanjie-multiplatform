@@ -292,7 +292,7 @@ jobs:
           retention-days: 7
 
   package:
-    name: CTest Package
+    name: Windows Package
     needs: aggregate
     runs-on: windows-2025-vs2026
     timeout-minutes: 20
@@ -445,7 +445,7 @@ jobs:
     needs: linux-ctest
     runs-on: ubuntu-latest
     outputs:
-      artifact_name: linux-package-${{ github.run_attempt }}
+      artifact_name: linux-archive-${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -458,10 +458,33 @@ jobs:
         run: python3 scripts/release_artifacts.py unpack build/linux/transfer/tested.tar --root .
       - name: Package accepted payload
         run: bash linux/scripts/package.sh --tested build/linux/payload build/linux/tested.json
-      - name: Prepare verified release assets
-        run: |
-          python3 scripts/release.py manifest --platform linux --folder build/linux/dist
-      - name: Upload verified artifacts
+      - name: Upload Linux archive and checksum
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node.js 24)
+        with:
+          name: linux-archive-${{ github.run_attempt }}
+          path: |
+            build/linux/dist/shanjie-linux-*.tar.gz
+            build/linux/dist/shanjie-linux-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  linux-manifest:
+    name: Linux Manifest
+    needs: linux-package
+    runs-on: ubuntu-latest
+    outputs:
+      artifact_name: linux-package-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: ${{ needs.linux-package.outputs.artifact_name }}
+          path: build/linux/dist
+      - name: Create source manifest from the packaged archive
+        run: python3 scripts/release.py manifest --platform linux --folder build/linux/dist
+      - name: Upload Linux release assets
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2 (Node.js 24)
         with:
           name: linux-package-${{ github.run_attempt }}
@@ -474,17 +497,17 @@ jobs:
 
   linux-artifact-gate:
     name: Linux Artifact Gate
-    needs: linux-package
+    needs: linux-manifest
     runs-on: ubuntu-latest
     outputs:
-      artifact_name: ${{ needs.linux-package.outputs.artifact_name }}
+      artifact_name: ${{ needs.linux-manifest.outputs.artifact_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: ${{ needs.linux-package.outputs.artifact_name }}
+          name: ${{ needs.linux-manifest.outputs.artifact_name }}
           path: build/linux-gate
       - name: Verify Linux manifest and SHA-256
         run: python3 scripts/release.py check --platform linux --folder build/linux-gate
