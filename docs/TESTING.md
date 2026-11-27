@@ -44,7 +44,7 @@ GitHub Actions 固定使用 `pwsh -File scripts/test.ps1 -Level CI -CiSafe`，�
 
 PR 指向 main 時，開啟、更新提交與重新開啟會跑輕量 CI；`workflow_dispatch` 也只跑相同集合。一般開發分支 push、本機編譯、commit 或 CTest 都不觸發 Actions。完整驗收在本機執行；未另加自動或手動 FULL workflow。既有 release workflow 仍只在 main 的版本檔變更或明確手動啟動時執行，手動預設僅驗證，發布仍受原本的版本、相依 job 與模式檢查約束。
 
-Release Actions 主流程為 `Plan` → `Release` → `Publish`。`Release` 呼叫 `release-platforms.yml`，整合 Windows 平行流程與選用的 Linux Job；Linux 放在該子流程定義的最後，保留與 Windows 建置平行執行的關係，實際圖表位置由 GitHub 排版。`mode` 預設 `verify`，不提供 legacy 或 `pipeline` 選項。Windows 同時建置 x64、x86 與完整 37 支核心測試執行檔，驗證建置收據後封存共同 snapshot，再平行執行雙架構 CTest 與四個核心 shard。Linux 沿用 `RELEASE-CHANNEL.json` 的 `build_linux` 開關及既有 Fedora 封裝流程；啟用時，兩平台全部成功才允許發布。
+Release Actions 主流程為 `Plan` → `Release` → `Publish`。`Release` 呼叫 `release-platforms.yml`，整合 Windows 平行流程與選用的 `Linux` → `Linux CTest` → `Linux Package` 分支；Linux 定義放在該子流程最後，與 Windows 平行執行，實際圖表位置由 GitHub 排版。`mode` 預設 `verify`，不提供 legacy 或 `pipeline` 選項。Windows 同時建置 x64、x86 與完整 37 支核心測試執行檔，驗證建置收據後封存共同 snapshot，再平行執行雙架構 CTest 與四個核心 shard。Linux 沿用 `RELEASE-CHANNEL.json` 的 `build_linux` 開關；啟用時，兩平台全部成功才允許發布。
 
 Actions 中 `Windows x64/x86` 建置產品，`Windows Core` 準備核心測試執行檔；`CTest x64/x86` 執行各架構 CTest；`Core cap/mixed/share/latency` 是四個直接執行預編譯核心測試的分片；`CTest Merge` 核對分片證據；`CTest Package` 執行封裝驗證。四個分片依賴 `Snapshot`，上游工作完成後才會展開 matrix。`engine_cap` 獨立一片，其餘依 Run 45828667360 的實測成本分配；`engine_lm`、`engine_replay`、`engine_newword` 在同一 runner 依序以單行程、單執行緒執行，完成後才跑該片其他測試。分片不呼叫 Cargo；執行檔與相依 DLL 從 Cargo 回傳的實際路徑收集，上游編譯期 fixture 路徑要求各 job 使用相同 checkout 路徑。
 
@@ -54,11 +54,13 @@ RELEASE 及 FULL 均重新執行必要核心斷言，不採用以前的 passed �
 
 ### Linux 發布基本測試
 
-Linux Job 只在 `build_linux=true` 時執行。`linux/scripts/package.sh` 建置安裝樹後，先呼叫 `linux/scripts/test.sh <安裝樹>`，通過後才建立 `.tar.gz` 與校驗檔；CTest 失敗會阻止封存、產物上傳與發布。Windows 的固定 CI 與 FULL／RELEASE 清冊不變。
+Linux 分支只在 `build_linux=true` 時執行。`Linux` 在 Fedora 44 建置安裝樹，傳遞產物、產生的 core 來源與 Cargo 編譯產物；`Linux CTest` 還原後透過 `linux/scripts/test.sh <安裝樹>` 實測，Cargo 仍重新驗證編譯指紋。通過後傳遞安裝樹、清冊、JUnit、日誌與收據；`Linux Package` 使用 `linux/scripts/package.sh --tested <安裝樹> <收據>`，由 `scripts/release_linux.py` 核對同 commit／run、版本、完整清冊、JUnit 與安裝樹 SHA-256 後才建立 `.tar.gz` 與校驗檔，不重跑建置或測試。缺少、跳過、失敗或雜湊不一致的證據均不能封裝。
+
+直接呼叫 `linux/scripts/package.sh` 仍會先建置並執行基本 CTest，再驗證同一份收據封裝。三階段只傳遞測試報告檔案，不傳遞私人 D-Bus／XDG fixture。Windows 的固定 CI 與 FULL／RELEASE 清冊不變。
 
 Linux 清冊由 `linux/tests/CMakeLists.txt` 管理，包含 shared、Linux common、IBus、settings 四組 Cargo 單元測試，以及 `linux/tests/scenarios/` 的八個既有 IBus 情境。Cargo 使用鎖定依賴與 release profile，不執行上游 37 支重型核心測試或標示為 ignored 的線上測試。CTest 依序執行並於失敗時停止；IBus 情境以安裝樹內的引擎與資料，在私人 D-Bus／IBus 與獨立 XDG profile 執行。
 
-報告保存在 `build/reports/linux-*/junit.xml` 與 `ctest.log`，Actions 無論測試成功或失敗都上傳。這是基本單元與隔離 IBus 驗收，不代表實際 GNOME 桌面、設定視窗操作或安裝／解除安裝已驗收。本機沒有 Linux 執行環境時，僅認列腳本語法、CTest 清冊及封裝失敗門控的合成測試。
+報告保存在 `build/reports/linux-*/inventory.json`、`junit.xml` 與 `ctest.log`，Actions 無論測試成功或失敗都上傳已產生的報告。這是基本單元與隔離 IBus 驗收，不代表實際 GNOME 桌面、設定視窗操作或安裝／解除安裝已驗收。本機沒有 Linux 執行環境時，僅認列腳本語法、CTest 清冊及封裝失敗門控的合成測試。
 
 直接使用 CTest：
 
