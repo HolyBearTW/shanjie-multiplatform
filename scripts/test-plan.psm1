@@ -27,7 +27,7 @@ function Get-VerificationPresetLabels([string]$Level,[string]$Architecture,[stri
 }
 
 function Test-BetaCoreResultReuse([string]$Level,[bool]$CiSafe,[bool]$Prerelease) {
-    return $Level -eq 'RELEASE' -and $CiSafe -and $Prerelease
+    return $Level -eq 'AFFECTED' -and $CiSafe -and $Prerelease
 }
 
 function Test-VerificationDocumentation([string]$Path) {
@@ -40,7 +40,7 @@ function Get-VerificationImpact([string]$Path) {
     $labels = @()
     switch -Regex ($Path) {
         '^scripts/verify-rowstats\.ps1$' { $labels=@('test-framework');$reason='G05 is a manual special test; automatic acceptance only checks its classification.';break }
-        '^(scripts/(release|test_release)\.py|\.github/workflows/(release|ci)\.yml|scripts/(cargo-cache-key|runner-diagnostics|verify-(changed|selection))\.ps1|tests/verify_selection\.ps1)$' {
+        '^(scripts/(release|test_release)\.py|\.github/workflows/(release|ci)\.yml|scripts/(cargo-cache-key|runner-diagnostics|release-pipeline|verify-(changed|selection))\.ps1|scripts/core-shards\.psm1|tests/verify_selection\.ps1)$' {
             $labels=@('test-framework');$reason='Selection and release transaction self-tests; no product build.';break
         }
         '^(platform/(candidates_windows|composition_windows|input_windows|key_options_windows|learning_windows|mapped_array|mapped_lm|map_model|resident_windows|selection_journal_windows|selection_learning_windows|smart_input_windows|word_set_windows)\.rs|scripts/prepare-(core|lm|candidates|keys|smart-input|selection-learning|resident|memory|english)\.ps1)$' {

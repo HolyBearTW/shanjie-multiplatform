@@ -164,4 +164,5 @@ foreach($file in @($installer,"$candidateRoot/package/x86/Shanjie.dll","$($snaps
     finally{[IO.File]::WriteAllBytes($file,$bytes);(Get-Item -LiteralPath $file).IsReadOnly=$readOnly}
 }
 $null=Assert-ReleaseAcceptance $fixture $reportPath
+& "$PSScriptRoot/release_parallel.ps1" -FixtureRoot $fixture -Prepack $prepack
 'PASS release guard: synthetic CTest evidence, dual-architecture gate, frozen test/package inputs, hash changes, receipt reuse and stale/dirty/skipped/incomplete rejection; no Windows product acceptance executed'
