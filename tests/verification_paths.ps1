@@ -72,7 +72,7 @@ $cacheDriver="$project/scripts/cargo-input-cache.ps1"
 $resourceLoop=$buildAst.Find({param($node) $node -is [Management.Automation.Language.ForEachStatementAst] -and $node.Extent.Text.Contains("foreach("+'$name'+" in 'mode_icons','setup')")},$true)
 foreach($cacheArch in 'x64','x86'){
     $cacheRoot=Join-Path $ResultRoot "cargo-input-cache-$cacheArch"
-    $cacheSources=@('windows/src/lib.rs','windows/build.rs','shared/src/lib.rs','profiles/windows.ini')
+    $cacheSources=@('windows/src/lib.rs','windows/build.rs','shared/src/lib.rs','platform/half_punctuation.rs','profiles/windows.ini')
     $cacheObjects=@('windows/target/deps/library.rlib',"build/native-$cacheArch/mode_icons.res","build/native-$cacheArch/setup.res")
     $originalTime=[DateTime]::Parse('2026-01-01T00:00:00Z').ToUniversalTime().AddTicks(1234567)
     $newTime=$originalTime.AddDays(2)

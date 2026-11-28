@@ -15,7 +15,7 @@ if($Operation -eq 'Restore'){
     if($saved.schema -ne 1 -or $saved.context -cne $Context){Write-Host '[CARGO INPUT CACHE] MISS: compilation context changed';return}
 }
 $paths=@('windows/src','windows/build.rs','windows/Cargo.toml','windows/Cargo.lock',
-    'shared/src','shared/Cargo.toml','build/core/src','build/core/Cargo.toml',
+    'shared/src','shared/Cargo.toml','platform','build/core/src','build/core/Cargo.toml',
     '.cargo/config.toml','.cargo/windows-release-x64.toml','profiles/windows.ini','profiles/shanjie.ini',
     'ui/Themes/Sj.xaml','assets/mode/chinese.png','assets/mode/english.png','data/model-v6-classes-v4.json')
 $inputs=Get-RelativeFileEntries -Root $Root -Paths $paths
