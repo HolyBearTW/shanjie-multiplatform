@@ -107,7 +107,7 @@ jobs:
           retention-days: 3
 
   seal:
-    name: Windows Snapshot
+    name: Windows CTest
     needs: [build-x64, build-x86, prepare-core]
     runs-on: windows-2025-vs2026
     timeout-minutes: 15
@@ -155,17 +155,41 @@ jobs:
           retention-days: 3
 
   Windows-CTest:
-    name: Windows CTest ${{ matrix.architecture }}
+    name: ${{ matrix.name }}
     needs: seal
     outputs:
       snapshot_id: ${{ needs.seal.outputs.snapshot_id }}
       snapshot_sha256: ${{ needs.seal.outputs.snapshot_sha256 }}
     runs-on: windows-2025-vs2026
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.phase == 'Verify' && 45 || 30 }}
     strategy:
       fail-fast: true
       matrix:
-        architecture: [x64, x86]
+        include:
+        - name: Windows CTest x64
+          phase: Verify
+          architecture: x64
+          shard: ''
+        - name: Windows CTest x86
+          phase: Verify
+          architecture: x86
+          shard: ''
+        - name: Core cap
+          phase: Shard
+          architecture: ''
+          shard: cap
+        - name: Core mixed
+          phase: Shard
+          architecture: ''
+          shard: mixed
+        - name: Core share
+          phase: Shard
+          architecture: ''
+          shard: share
+        - name: Core latency
+          phase: Shard
+          architecture: ''
+          shard: latency
     defaults:
       run:
         shell: pwsh
@@ -174,61 +198,47 @@ jobs:
         with:
           persist-credentials: false
       - uses: ./.github/actions/release-setup
+        if: matrix.phase == 'Verify'
         with:
           role: verify
           architecture: ${{ matrix.architecture }}
+      - name: Initialize pinned upstream (official, then mirror)
+        if: matrix.phase == 'Shard'
+        run: pwsh -NoProfile -File scripts/sync-upstream.ps1
       - uses: ./.github/actions/release-snapshot
         with:
           id: ${{ needs.seal.outputs.snapshot_id }}
       - name: Run CTest
+        if: matrix.phase == 'Verify'
         run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Verify -Architecture '${{ matrix.architecture }}' -SnapshotId '${{ needs.seal.outputs.snapshot_id }}' -SnapshotHash '${{ needs.seal.outputs.snapshot_sha256 }}'
+      - name: Run core shard
+        if: matrix.phase == 'Shard'
+        run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Shard -Shard '${{ matrix.shard }}' -SnapshotId '${{ needs.seal.outputs.snapshot_id }}' -SnapshotHash '${{ needs.seal.outputs.snapshot_sha256 }}'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: matrix.phase == 'Verify'
         with:
           name: release-verify-${{ needs.seal.outputs.snapshot_id }}-${{ matrix.architecture }}
           path: build/parallel/verify-${{ matrix.architecture }}.tar
           compression-level: 0
           if-no-files-found: error
           retention-days: 7
-      - name: Retain failed verification logs
-        if: failure()
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
-        with:
-          name: failed-verify-${{ matrix.architecture }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: build/reports
-          retention-days: 7
-
-  core-tests:
-    name: Core ${{ matrix.shard }}
-    needs: seal
-    runs-on: windows-2025-vs2026
-    timeout-minutes: 30
-    strategy:
-      fail-fast: true
-      matrix:
-        shard: [cap, mixed, share, latency]
-    defaults:
-      run:
-        shell: pwsh
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
-      - name: Initialize pinned upstream (official, then mirror)
-        run: pwsh -NoProfile -File scripts/sync-upstream.ps1
-      - uses: ./.github/actions/release-snapshot
-        with:
-          id: ${{ needs.seal.outputs.snapshot_id }}
-      - name: Run core shard
-        run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Shard -Shard '${{ matrix.shard }}' -SnapshotId '${{ needs.seal.outputs.snapshot_id }}' -SnapshotHash '${{ needs.seal.outputs.snapshot_sha256 }}'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        if: matrix.phase == 'Shard'
         with:
           name: release-core-${{ needs.seal.outputs.snapshot_id }}-${{ matrix.shard }}
           path: build/parallel/core-${{ matrix.shard }}.tar
           compression-level: 0
           if-no-files-found: error
           retention-days: 7
+      - name: Retain failed verification logs
+        if: failure() && matrix.phase == 'Verify'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: failed-verify-${{ matrix.architecture }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/reports
+          retention-days: 7
       - name: Retain failed shard receipts and logs
-        if: failure()
+        if: failure() && matrix.phase == 'Shard'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: failed-core-${{ matrix.shard }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -237,7 +247,7 @@ jobs:
 
   aggregate:
     name: CTest Merge
-    needs: [Windows-CTest, core-tests]
+    needs: Windows-CTest
     outputs:
       snapshot_id: ${{ needs.Windows-CTest.outputs.snapshot_id }}
       snapshot_sha256: ${{ needs.Windows-CTest.outputs.snapshot_sha256 }}
