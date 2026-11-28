@@ -42,20 +42,30 @@ jobs:
           if [ "$VERIFY_ONLY" = "true" ]; then flags=(--verify); fi
           python3 scripts/release.py plan "${flags[@]}"
 
-  platforms:
+  windows:
     name: Release
     needs: release
-    uses: ./.github/workflows/release-platforms.yml
+    uses: ./.github/workflows/release-windows.yml
     with:
       build_linux: ${{ needs.release.outputs.build_linux == 'true' }}
       publish: ${{ needs.release.outputs.publish == 'true' }}
 
+  z-linux:
+    name: Release
+    needs: release
+    if: needs.release.outputs.build_linux == 'true'
+    uses: ./.github/workflows/release-linux.yml
+    with:
+      build_linux: ${{ needs.release.outputs.build_linux == 'true' }}
+
   publish:
     name: Publish
-    needs: platforms
+    needs: [windows, z-linux]
     if: >-
-      ${{ always() && needs.platforms.outputs.publish == 'true' &&
-          needs.platforms.result == 'success' }}
+      ${{ always() && needs.windows.outputs.publish == 'true' &&
+          needs.windows.result == 'success' &&
+          ((needs.windows.outputs.build_linux == 'true' && needs.z-linux.result == 'success') ||
+           (needs.windows.outputs.build_linux == 'false' && needs.z-linux.result == 'skipped')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -66,12 +76,12 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: ${{ needs.platforms.outputs.artifact_name }}
+          name: ${{ needs.windows.outputs.artifact_name }}
           path: build/release-assets/windows
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        if: needs.platforms.outputs.build_linux == 'true'
+        if: needs.windows.outputs.build_linux == 'true'
         with:
-          name: ${{ needs.platforms.outputs.linux_artifact_name }}
+          name: ${{ needs.z-linux.outputs.artifact_name }}
           path: build/release-assets/linux
       - name: Resume and publish only a complete same-source draft
         env:

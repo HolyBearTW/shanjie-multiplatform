@@ -334,15 +334,24 @@ class ReleaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             r.assets_for(self.config, self.folder)
     def test_publication_output_requires_successful_required_platform_jobs(self):
-        workflow = (r.ROOT / '.github/workflows/release-platforms.yml').read_text(encoding='utf-8')
-        outputs = workflow.split('\n    outputs:\n', 1)[1].split('\npermissions:\n', 1)[0]
-        publish = outputs.split('\n      publish:\n', 1)[1].split('\n      build_linux:\n', 1)[0]
-        self.assertIn('jobs.package.outputs.artifact_name', outputs)
-        self.assertIn('jobs.z-linux-artifact-gate.outputs.artifact_name', outputs)
-        raw = publish.split('        value: >-\n', 1)[1].strip()
+        parent = (r.ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
+        sections = re.split(r'^  ([A-Za-z][A-Za-z0-9-]*):\n', parent.split('\njobs:\n', 1)[1], flags=re.M)
+        callers = dict(zip(sections[1::2], sections[2::2]))
+        for name, file in [('windows', 'release-windows.yml'), ('z-linux', 'release-linux.yml')]:
+            self.assertIn('needs: release', callers[name])
+            self.assertIn('uses: ./.github/workflows/' + file, callers[name])
+        self.assertIn("if: needs.release.outputs.build_linux == 'true'", callers['z-linux'])
+        publish = callers['publish']
+        self.assertIn('needs: [windows, z-linux]', publish)
+        self.assertIn('needs.windows.outputs.artifact_name', publish)
+        self.assertIn('needs.z-linux.outputs.artifact_name', publish)
+        raw = publish.split('    if: >-\n', 1)[1].split('\n    runs-on:', 1)[0].strip()
         expression = ' '.join(raw.removeprefix('${{').removesuffix('}}').split())
-        expression = expression.replace('inputs.publish', 'publish_requested').replace('inputs.build_linux', 'linux_enabled')
-        expression = expression.replace('jobs.package.outputs.status', 'windows_result').replace('jobs.z-linux-artifact-gate.outputs.status', 'linux_result')
+        expression = expression.replace('always()', 'True')
+        expression = expression.replace("needs.windows.outputs.publish == 'true'", 'publish_requested')
+        expression = expression.replace("needs.windows.outputs.build_linux == 'true'", 'linux_enabled')
+        expression = expression.replace("needs.windows.outputs.build_linux == 'false'", '(not linux_enabled)')
+        expression = expression.replace('needs.windows.result', 'windows_result').replace('needs.z-linux.result', 'linux_result')
         expression = expression.replace('&&', ' and ').replace('||', ' or ').replace('!', ' not ')
         for publish_requested in [False, True]:
             for linux_enabled in [False, True]:
@@ -352,17 +361,21 @@ class ReleaseTests(unittest.TestCase):
                         with self.subTest(publish=publish_requested, linux=linux_enabled, windows=windows_result, result=linux_result):
                             self.assertEqual(eval(expression, {'__builtins__': {}}, {
                                 'publish_requested': publish_requested, 'linux_enabled': linux_enabled,
-                                'windows_result': '' if windows_result == 'skipped' else windows_result,
-                                'linux_result': '' if linux_result == 'skipped' else linux_result}), expected)
-        parent = (r.ROOT / '.github/workflows/release.yml').read_text(encoding='utf-8')
-        publish = parent.split('\n  publish:\n', 1)[1]
-        self.assertIn('needs: platforms', publish)
-        self.assertIn("needs.platforms.outputs.publish == 'true'", publish)
-        self.assertIn("needs.platforms.result == 'success'", publish)
+                                'windows_result': windows_result, 'linux_result': linux_result}), expected)
+        windows = (r.ROOT / '.github/workflows/release-windows.yml').read_text(encoding='utf-8').split('\njobs:\n', 1)[0]
+        linux = (r.ROOT / '.github/workflows/release-linux.yml').read_text(encoding='utf-8').split('\njobs:\n', 1)[0]
+        self.assertIn('jobs.package.outputs.artifact_name', windows)
+        self.assertIn('jobs.package.outputs.publish', windows)
+        self.assertIn('jobs.package.outputs.build_linux', windows)
+        self.assertIn('jobs.z-linux-artifact-gate.outputs.artifact_name', linux)
     def test_platform_branches_remain_independent_and_keep_their_gates(self):
-        workflow = (r.ROOT / '.github/workflows/release-platforms.yml').read_text(encoding='utf-8')
-        sections = re.split(r'^  ([a-z][a-z0-9-]*):\n', workflow.split('\njobs:\n', 1)[1], flags=re.M)
-        jobs = dict(zip(sections[1::2], sections[2::2]))
+        jobs = {}
+        for name in ['release-windows.yml', 'release-linux.yml']:
+            workflow = (r.ROOT / '.github/workflows' / name).read_text(encoding='utf-8')
+            sections = re.split(r'^  ([A-Za-z][A-Za-z0-9-]*):\n', workflow.split('\njobs:\n', 1)[1], flags=re.M)
+            platform = dict(zip(sections[1::2], sections[2::2]))
+            self.assertFalse(set(jobs) & set(platform))
+            jobs.update(platform)
         dependencies = {}
         for name, body in jobs.items():
             match = re.search(r'^    needs: (.+)$', body, re.M)
@@ -377,8 +390,10 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(levels['package'], 5)
         self.assertNotIn('release-ready', jobs)
         self.assertNotIn('z-linux-manifest', jobs)
-        for name in ['package', 'z-linux-artifact-gate']:
-            self.assertIn('status: ${{ job.status }}', jobs[name])
+        self.assertIn('name: Windows CTest ${{ matrix.architecture }}', jobs['Windows-CTest'])
+        self.assertIn('architecture: [x64, x86]', jobs['Windows-CTest'])
+        self.assertIn('fail-fast: true', jobs['Windows-CTest'])
+        self.assertCountEqual(dependencies['aggregate'], ['Windows-CTest', 'core-tests'])
         linux = {name for name in jobs if name.startswith('z-linux')}
         windows = set(jobs) - linux
         for platform, other_platform in [(linux, windows), (windows, linux)]:
