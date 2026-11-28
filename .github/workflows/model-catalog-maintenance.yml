@@ -46,18 +46,23 @@ jobs:
       - name: Contract and fault tests
         run: python -m unittest discover -s scripts/model_catalog -p "test_*.py" -v
       - name: Discover source-verified models
+        id: discovery
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python scripts/model_catalog/catalog.py discover
           if($LASTEXITCODE){throw 'Discovery failed.'}
+          $plan=Get-Content build/model-catalog/plan.json -Raw|ConvertFrom-Json
+          $assets=@($plan.candidates | ForEach-Object {$_.assets.sha256} | Sort-Object -Unique)
+          'paths<<CATALOG_INPUT_FILES' >> $env:GITHUB_OUTPUT
+          'build/model-catalog/plan.json' >> $env:GITHUB_OUTPUT
+          foreach($sha in $assets){"build/model-catalog/assets/$sha" >> $env:GITHUB_OUTPUT}
+          'CATALOG_INPUT_FILES' >> $env:GITHUB_OUTPUT
       - name: Shared discovery inputs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: model-catalog-inputs
-          path: |
-            build/model-catalog/plan.json
-            build/model-catalog/assets
+          path: ${{ steps.discovery.outputs.paths }}
           compression-level: 0
           if-no-files-found: error
           retention-days: 3
