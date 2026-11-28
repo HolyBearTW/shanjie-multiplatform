@@ -54,6 +54,8 @@ Actions 中 `Windows x64/x86` 建置產品，`Windows Core` 準備核心測試�
 
 RELEASE 及 FULL 均重新執行必要核心斷言，不採用以前的 passed 結果；非正式 AFFECTED 才可依既有精確指紋收據重用，重型清單含 `engine_mixed`。Cargo 部分還原仍由 Cargo fingerprint 與產生來源收據重新驗證。WinUI 快取包含 SDK、全部來源／設定及輸出檔案雜湊；本輪原生 DLL 一律重新置入。
 
+產品 Cargo 快取包含各架構的 `build/native-*` 與輸入時間戳清冊。`cargo-input-cache.ps1` 只在編譯情境、全部來源雜湊與全部快取產物雜湊吻合時還原來源 mtime，避免新 checkout 的時間戳使同內容程式碼失效；情境或來源不同時保留 Cargo 正常增量判斷，產物清冊或雜湊不符則拒絕使用。資源仍每次重新編譯到暫存檔，比對相同位元組才保留既有 `.res` 時間戳；不改 Cargo 指紋、不略過 build.rs 或測試。成功建置後才保存這份清冊，快取版本與編譯輸入綁定。`-CargoVerbose` 與 Cargo fingerprint trace 可用來檢查 Fresh／Dirty 與具體失效原因。
+
 ### Linux 發布基本測試
 
 Linux 分支只在 `build_linux=true` 時執行。`Linux` 在 Fedora 44 建置安裝樹，傳遞產物、產生的 core 來源與 Cargo 編譯產物；`Linux CTest` 還原後透過 `linux/scripts/test.sh <安裝樹>` 實測，Cargo 仍重新驗證編譯指紋。通過後傳遞安裝樹、清冊、JUnit、日誌與收據；`Linux Package` 使用 `linux/scripts/package.sh --tested <安裝樹> <收據>`，由 `scripts/release_linux.py` 核對同 commit／run、版本、完整清冊、JUnit 與安裝樹 SHA-256 後才建立 `.tar.gz` 與校驗檔，不重跑建置或測試。缺少、跳過、失敗或雜湊不一致的證據均不能封裝。
