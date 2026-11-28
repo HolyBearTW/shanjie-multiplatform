@@ -125,19 +125,38 @@ foreach($cacheArch in 'x64','x86'){
         Copy-Item -LiteralPath "$project/scripts/$script" -Destination "$driverRoot/scripts/$script"
     }
     [IO.File]::WriteAllText("$driverRoot/scripts/build.ps1",@'
-param([string]$Architecture,[switch]$SkipSettings,[switch]$CargoVerbose,[switch]$UseCurrentToolchain)
+param([string]$Architecture,[switch]$SkipSettings,[switch]$SkipSharedData,[switch]$CargoVerbose,[switch]$UseCurrentToolchain)
 $root=Split-Path $PSScriptRoot -Parent
 if(Test-Path "$root/windows/target"){throw 'Rejected target directory reached the build.'}
 $null=New-Item -ItemType Directory -Path "$root/windows/target/deps" -Force
 [IO.File]::WriteAllText("$root/windows/target/deps/library.rlib",'rebuilt output')
-@{architecture=$Architecture;skip_settings=[bool]$SkipSettings;verbose=[bool]$CargoVerbose}|ConvertTo-Json|Set-Content "$root/build-call.json"
+@{architecture=$Architecture;skip_settings=[bool]$SkipSettings;skip_shared_data=[bool]$SkipSharedData;verbose=[bool]$CargoVerbose}|ConvertTo-Json|Set-Content "$root/build-call.json"
 $global:LASTEXITCODE=0
 '@)
+    if($cacheArch -eq 'x86'){
+        $null=New-Item -ItemType Directory -Path "$driverRoot/dist/data/models/builtin" -Force
+        [IO.File]::WriteAllText("$driverRoot/dist/data/models/builtin/bigram.winmap",'restored model cache without runtime data')
+        [IO.File]::WriteAllText("$driverRoot/scripts/prepare-models.ps1",@'
+$root=Split-Path $PSScriptRoot -Parent
+if(!(Test-Path "$root/dist/data/models/builtin/bigram.winmap")){throw 'Expected cached built-in model fixture.'}
+[IO.File]::AppendAllText("$root/data-call.txt","models`n")
+'@)
+        [IO.File]::WriteAllText("$driverRoot/scripts/prepare-data.ps1",@'
+param([string]$Licenses)
+$root=Split-Path $PSScriptRoot -Parent
+if($Licenses -ne 'dist/LICENSES'){throw 'Licenses were not prepared.'}
+[IO.File]::WriteAllText("$root/dist/data/dictionary.tsv",'runtime data from the pinned source')
+[IO.File]::AppendAllText("$root/data-call.txt","data`n")
+'@)
+    }
     function python {ConvertTo-Json -InputObject @($args)|Set-Content "$driverRoot/probe-call.json";$global:LASTEXITCODE=0}
     try { & "$driverRoot/scripts/model_catalog/probe.ps1" -Architecture $cacheArch -CacheContext 'compiler-profile-v1' }
     finally {Remove-Item Function:python}
     $built=Get-Content "$driverRoot/build-call.json" -Raw|ConvertFrom-Json
     Assert-PathCheck ($built.architecture -eq $cacheArch -and $built.skip_settings -and $built.verbose) "$cacheArch rejected cache still builds the same verbose product targets"
+    if($cacheArch -eq 'x86'){
+        Assert-PathCheck ($built.skip_shared_data -and (Get-Content "$driverRoot/data-call.txt" -Raw) -ceq "models`ndata`n" -and (Test-Path "$driverRoot/dist/data/dictionary.tsv")) 'Independent x86 runner validates cached models and prepares missing runtime data exactly once'
+    }else{Assert-PathCheck (!$built.skip_shared_data) 'x64 keeps its normal model and runtime data preparation'}
     Assert-PathCheck ((Get-Content "$driverRoot/windows/target/deps/library.rlib" -Raw) -eq 'rebuilt output') "$cacheArch corrupted compilation output is replaced by a normal build"
     Assert-PathCheck ((@(Get-ChildItem "$driverRoot/windows/.deleted_files" -Directory)).Count -eq 1) "$cacheArch invalid cache is retained for diagnosis"
     $saved=Get-Content "$driverRoot/build/cargo-inputs/$cacheArch.json" -Raw|ConvertFrom-Json -AsHashtable

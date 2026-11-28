@@ -22,8 +22,14 @@ try {
             }
         }
     }
-    & "$project/scripts/build.ps1" -Architecture $Architecture -SkipSettings -CargoVerbose -UseCurrentToolchain:$UseCurrentToolchain
+    & "$project/scripts/build.ps1" -Architecture $Architecture -SkipSettings -SkipSharedData:($Architecture -eq 'x86') -CargoVerbose -UseCurrentToolchain:$UseCurrentToolchain
     if($LASTEXITCODE){throw 'Native checker build failed.'}
+    if($Architecture -eq 'x86'){
+        # On a separate runner the cached built-in model does not imply that
+        # runtime data exists or is current. Prepare both exactly once here.
+        & "$project/scripts/prepare-models.ps1"
+        & "$project/scripts/prepare-data.ps1" -Licenses 'dist/LICENSES'
+    }
     if($CacheContext){
         & "$project/scripts/cargo-input-cache.ps1" -Operation Save -Architecture $Architecture -Context $CacheContext
     }
