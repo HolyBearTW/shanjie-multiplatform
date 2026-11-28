@@ -367,7 +367,7 @@ class ReleaseTests(unittest.TestCase):
         self.assertIn('jobs.package.outputs.artifact_name', windows)
         self.assertIn('jobs.package.outputs.publish', windows)
         self.assertIn('jobs.package.outputs.build_linux', windows)
-        self.assertIn('jobs.z-linux-artifact-gate.outputs.artifact_name', linux)
+        self.assertIn('jobs.z-linux-package.outputs.artifact_name', linux)
     def test_platform_branches_remain_independent_and_keep_their_gates(self):
         jobs = {}
         for name in ['release-windows.yml', 'release-linux.yml']:
@@ -409,9 +409,10 @@ class ReleaseTests(unittest.TestCase):
         package = jobs['z-linux-package']
         self.assertIn('scripts/release.py manifest --platform linux', package)
         self.assertIn('build/linux/dist/release-source.json', package)
-        self.assertEqual(dependencies['z-linux-artifact-gate'], ['z-linux-package'])
-        self.assertIn('needs.z-linux-package.outputs.artifact_name', jobs['z-linux-artifact-gate'])
-        self.assertIn('scripts/release.py check --platform linux --folder build/linux-gate', jobs['z-linux-artifact-gate'])
+        self.assertNotIn('z-linux-artifact-gate', jobs)
+        self.assertIn('scripts/release.py check --platform linux --folder build/linux-gate', package)
+        self.assertLess(package.index('name: Upload Linux release assets'), package.index('path: build/linux-gate'))
+        self.assertLess(package.index('path: build/linux-gate'), package.index('scripts/release.py check --platform linux'))
     def test_linux_artifact_gate_checks_only_linux_without_github(self):
         self.config['build_linux'] = True
         linux = self.folder / 'linux'

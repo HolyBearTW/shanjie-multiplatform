@@ -10,7 +10,7 @@ on:
     outputs:
       artifact_name:
         description: Verified Linux package artifact
-        value: ${{ jobs.z-linux-artifact-gate.outputs.artifact_name }}
+        value: ${{ jobs.z-linux-package.outputs.artifact_name }}
 
 permissions:
   contents: read
@@ -130,20 +130,9 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  z-linux-artifact-gate:
-    name: Linux Artifact Gate
-    needs: z-linux-package
-    runs-on: ubuntu-latest
-    outputs:
-      artifact_name: ${{ needs.z-linux-package.outputs.artifact_name }}
-      status: ${{ job.status }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-        with:
-          persist-credentials: false
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
-          name: ${{ needs.z-linux-package.outputs.artifact_name }}
+          name: linux-package-${{ github.run_attempt }}
           path: build/linux-gate
       - name: Verify Linux manifest and SHA-256
         run: python3 scripts/release.py check --platform linux --folder build/linux-gate
