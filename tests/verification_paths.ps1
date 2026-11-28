@@ -113,6 +113,38 @@ foreach($cacheArch in 'x64','x86'){
     try{& $cacheDriver -Operation Restore -Architecture $cacheArch -Context 'compiler-profile-v1' -Root $cacheRoot}catch{$rejected=$true}
     Assert-PathCheck ($rejected -and (Get-Item "$cacheRoot/windows/src/lib.rs").LastWriteTimeUtc -eq $newTime) "$cacheArch changed artifacts fail before any source timestamp is restored"
 
+    # Execute the real catalog driver against an invalid cache. Only the product
+    # build and native checker are mocked; restoration and quarantine are real.
+    $driverRoot=Join-Path $ResultRoot "catalog-driver-$cacheArch"
+    $null=New-Item -ItemType Directory -Path "$driverRoot/scripts/model_catalog" -Force
+    foreach($folder in 'windows','shared','platform','profiles','build'){
+        Copy-Item -LiteralPath (Join-Path $cacheRoot $folder) -Destination $driverRoot -Recurse
+    }
+    Copy-Item -LiteralPath "$project/scripts/model_catalog/probe.ps1" -Destination "$driverRoot/scripts/model_catalog/probe.ps1"
+    foreach($script in 'cargo-input-cache.ps1','test-support.psm1','preserve-output.ps1'){
+        Copy-Item -LiteralPath "$project/scripts/$script" -Destination "$driverRoot/scripts/$script"
+    }
+    [IO.File]::WriteAllText("$driverRoot/scripts/build.ps1",@'
+param([string]$Architecture,[switch]$SkipSettings,[switch]$CargoVerbose,[switch]$UseCurrentToolchain)
+$root=Split-Path $PSScriptRoot -Parent
+if(Test-Path "$root/windows/target"){throw 'Rejected target directory reached the build.'}
+$null=New-Item -ItemType Directory -Path "$root/windows/target/deps" -Force
+[IO.File]::WriteAllText("$root/windows/target/deps/library.rlib",'rebuilt output')
+@{architecture=$Architecture;skip_settings=[bool]$SkipSettings;verbose=[bool]$CargoVerbose}|ConvertTo-Json|Set-Content "$root/build-call.json"
+$global:LASTEXITCODE=0
+'@)
+    function python {ConvertTo-Json -InputObject @($args)|Set-Content "$driverRoot/probe-call.json";$global:LASTEXITCODE=0}
+    try { & "$driverRoot/scripts/model_catalog/probe.ps1" -Architecture $cacheArch -CacheContext 'compiler-profile-v1' }
+    finally {Remove-Item Function:python}
+    $built=Get-Content "$driverRoot/build-call.json" -Raw|ConvertFrom-Json
+    Assert-PathCheck ($built.architecture -eq $cacheArch -and $built.skip_settings -and $built.verbose) "$cacheArch rejected cache still builds the same verbose product targets"
+    Assert-PathCheck ((Get-Content "$driverRoot/windows/target/deps/library.rlib" -Raw) -eq 'rebuilt output') "$cacheArch corrupted compilation output is replaced by a normal build"
+    Assert-PathCheck ((@(Get-ChildItem "$driverRoot/windows/.deleted_files" -Directory)).Count -eq 1) "$cacheArch invalid cache is retained for diagnosis"
+    $saved=Get-Content "$driverRoot/build/cargo-inputs/$cacheArch.json" -Raw|ConvertFrom-Json -AsHashtable
+    Assert-PathCheck ($saved.artifacts['windows/target/deps/library.rlib'] -eq (Get-FileHash "$driverRoot/windows/target/deps/library.rlib").Hash.ToLowerInvariant()) "$cacheArch successful rebuild saves a fresh integrity receipt"
+    $catalogArguments=Get-Content "$driverRoot/probe-call.json" -Raw|ConvertFrom-Json
+    Assert-PathCheck ('probe' -in $catalogArguments -and "windows-$cacheArch" -in $catalogArguments -and 'discover' -notin $catalogArguments -and 'assemble' -notin $catalogArguments) "$cacheArch driver probes only its architecture without discovering or assembling on a worker"
+
     $objects=Join-Path $cacheRoot "build/native-$cacheArch"
     foreach($name in 'mode_icons','setup'){
         [IO.File]::WriteAllText("$objects/$name.res.tmp",(Get-Content "$objects/$name.res" -Raw))
@@ -196,4 +228,8 @@ foreach($state in 'staged','committed','unstaged','docs-only'){
     if($state -eq 'docs-only'){Assert-PathCheck (!$code.Count) 'Pure documentation renames can still skip builds and tests'}
     else{Assert-PathCheck ($code.Count -gt 0) "A $state source move into docs cannot skip FAST/AFFECTED"}
 }
-"PASS verification paths: $checks checks (mock Cargo outputs and real Git rename fixtures; no Windows acceptance)"
+foreach($catalogPath in '.github/workflows/model-catalog-maintenance.yml','scripts/model_catalog/catalog.py','scripts/model_catalog/probe.ps1','scripts/model_catalog/test_catalog.py'){
+    $impact=Get-VerificationImpact $catalogPath
+    Assert-PathCheck (!$impact.Full -and 'test-framework' -in $impact.Labels) "$catalogPath selects the catalog and infrastructure regressions"
+}
+"PASS verification paths: $checks checks (mock Cargo outputs and real Git rename/cache fixtures; no Windows acceptance)"
