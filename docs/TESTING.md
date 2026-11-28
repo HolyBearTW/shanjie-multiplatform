@@ -40,6 +40,10 @@ pwsh -File scripts/verify-changed.ps1 -Base origin/main -ChangeScope Branch -Dry
 
 CI 與 Release 的子模組初始化共用 `scripts/sync-upstream.ps1`，官方讀取失敗才改用鏡像，固定 commit 不變。
 
+Model Catalog 的 `Discover` 初始化 pinned upstream，執行原有 25 項 Contract Tests 及矩陣／快取回歸，再把 `plan.json` 與 SHA-256 命名的模型資產交給兩個獨立的 Windows Runner。`Windows x64/x86` 矩陣上限為 2，各自初始化 upstream、呼叫 `probe.ps1 -Architecture x64/x86` 建置全部原有 Rust 目標，並逐一執行所有候選模型的 native prepare 與 Chat／Formal 評估。`Assemble / Validate` 等待整個矩陣，拒絕缺漏、重複、錯誤架構或 source commit／profile／dataset／plan／資產雜湊不符的證據，完整通過後才提供原人工 publish 或 `MODEL_CATALOG_AUTOPUBLISH` 發布入口。準確率仍是選用模型的參考資訊，技術可用性判定不變。
+
+Catalog 的 Cargo 編譯快取依 Runner 映像、Rust／MSVC／SDK、架構 triple、Cargo manifests／lockfiles、features 與建置設定隔離，包含 `windows/target`、`shared/target`、原生資源、準備過的 core 來源與既有 Cargo input receipt；registry／Git dependencies 另行保存。每次仍呼叫正常建置，沿用來源與產物雜湊驗證後的 mtime 還原；遭拒的編譯快取移至 ignored 備份再重新建置，成功後才保存新收據。English 與內建模型準備快取仍由原腳本核對內容。各架構 accuracy cache 僅重用同模型、source commit、target、dataset SHA-256 的完整成績，native prepare 每次重跑，報告保留當次技術證據；`summary.json` 區分實跑與重用數，Cargo verbose／fingerprint 及原生探測日誌另存 diagnostics artifact。固定 CI 的 `fast.infrastructure` 也執行 Catalog 的離線合約與矩陣證據回歸，不把模擬原生 checker 的成功當成實際模型驗收。
+
 GitHub Actions 固定使用 `pwsh -File scripts/test.ps1 -Level CI -CiSafe`，不讀分支差異，即使修改 CMake、測試框架或 CI 也不擴大。它執行上游資料完整性、Windows core overlay、shared／windows Cargo 單元測試及測試框架自檢。跨 Run 僅快取 Cargo registry 與 `shared/target`、`windows/target` 的單元測試編譯產物；Cargo 仍驗證自身 fingerprint 並實際執行測試，不快取模型、完整產品或測試成功結果。CI 不安裝 .NET、不編譯 WinUI、不下載完整 Git 歷史，也不做產品 release build、完整核心套件、TSF／UI 或封裝。保留既有 `ci` workflow 與 `unit-tests` job。
 
 PR 指向 main 時，開啟、更新提交與重新開啟會跑輕量 CI；`workflow_dispatch` 也只跑相同集合。一般開發分支 push、本機編譯、commit 或 CTest 都不觸發 Actions。完整驗收在本機執行；未另加自動或手動 FULL workflow。既有 release workflow 仍只在 main 的版本檔變更或明確手動啟動時執行，手動預設僅驗證，發布仍受原本的版本、相依 job 與模式檢查約束。
