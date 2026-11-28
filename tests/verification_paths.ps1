@@ -68,6 +68,73 @@ try {
     Assert-PathCheck ((Get-Content -LiteralPath "$root/dist/x64/Shanjie.dll" -Raw) -ceq 'current:x86_64-pc-windows-msvc:shanjie_windows.dll') 'The x86 build did not overwrite the x64 DLL'
 } finally {$env:CARGO_TARGET_DIR=$previousTargetDir;Remove-Item Function:cargo}
 
+$cacheDriver="$project/scripts/cargo-input-cache.ps1"
+$resourceLoop=$buildAst.Find({param($node) $node -is [Management.Automation.Language.ForEachStatementAst] -and $node.Extent.Text.Contains("foreach("+'$name'+" in 'mode_icons','setup')")},$true)
+foreach($cacheArch in 'x64','x86'){
+    $cacheRoot=Join-Path $ResultRoot "cargo-input-cache-$cacheArch"
+    $cacheSources=@('windows/src/lib.rs','windows/build.rs','shared/src/lib.rs','profiles/windows.ini')
+    $cacheObjects=@('windows/target/deps/library.rlib',"build/native-$cacheArch/mode_icons.res","build/native-$cacheArch/setup.res")
+    $originalTime=[DateTime]::Parse('2026-01-01T00:00:00Z').ToUniversalTime().AddTicks(1234567)
+    $newTime=$originalTime.AddDays(2)
+    foreach($path in $cacheSources+$cacheObjects){
+        $file=Join-Path $cacheRoot $path
+        $null=New-Item -ItemType Directory -Path (Split-Path $file -Parent) -Force
+        [IO.File]::WriteAllText($file,"fixture:$path")
+        [IO.File]::SetLastWriteTimeUtc($file,$originalTime)
+    }
+    & $cacheDriver -Operation Restore -Architecture $cacheArch -Context 'compiler-profile-v1' -Root $cacheRoot
+    Assert-PathCheck ((Get-Item "$cacheRoot/windows/src/lib.rs").LastWriteTimeUtc -eq $originalTime) "$cacheArch cold cache leaves source metadata intact"
+    & $cacheDriver -Operation Save -Architecture $cacheArch -Context 'compiler-profile-v1' -Root $cacheRoot
+    foreach($path in $cacheSources){[IO.File]::SetLastWriteTimeUtc((Join-Path $cacheRoot $path),$newTime)}
+    & $cacheDriver -Operation Restore -Architecture $cacheArch -Context 'compiler-profile-v1' -Root $cacheRoot
+    foreach($path in $cacheSources){Assert-PathCheck ((Get-Item (Join-Path $cacheRoot $path)).LastWriteTimeUtc -eq $originalTime) "$cacheArch identical input restores its recorded timestamp: $path"}
+    Assert-PathCheck ((Get-Item "$cacheRoot/windows/target/deps/library.rlib").LastWriteTimeUtc -eq $originalTime) "$cacheArch restore never rewrites compiled artifact timestamps"
+    foreach($case in 'content','added','missing','context'){
+        foreach($path in $cacheSources){
+            [IO.File]::WriteAllText((Join-Path $cacheRoot $path),"fixture:$path")
+            [IO.File]::SetLastWriteTimeUtc((Join-Path $cacheRoot $path),$newTime)
+        }
+        if($case -eq 'content'){[IO.File]::WriteAllText("$cacheRoot/shared/src/lib.rs",'gixture:shared/src/lib.rs')}
+        if($case -eq 'added'){[IO.File]::WriteAllText("$cacheRoot/windows/src/new.rs",'new input')}
+        if($case -eq 'missing'){Remove-Item -LiteralPath "$cacheRoot/shared/src/lib.rs"}
+        $context=if($case -eq 'context'){'different-compiler-or-flags'}else{'compiler-profile-v1'}
+        & $cacheDriver -Operation Restore -Architecture $cacheArch -Context $context -Root $cacheRoot
+        Assert-PathCheck ((Get-Item "$cacheRoot/windows/src/lib.rs").LastWriteTimeUtc -eq $newTime) "$cacheArch $case mismatch cannot authorize any timestamp restoration"
+        if($case -eq 'content'){Assert-PathCheck ((Get-Content "$cacheRoot/shared/src/lib.rs" -Raw) -ceq 'gixture:shared/src/lib.rs') "$cacheArch cache never overwrites modified source content"}
+        if($case -eq 'added'){Remove-Item -LiteralPath "$cacheRoot/windows/src/new.rs"}
+        if($case -eq 'missing'){Assert-PathCheck (!(Test-Path "$cacheRoot/shared/src/lib.rs")) "$cacheArch cache never recreates missing source"}
+    }
+    foreach($path in $cacheSources){
+        [IO.File]::WriteAllText((Join-Path $cacheRoot $path),"fixture:$path")
+        [IO.File]::SetLastWriteTimeUtc((Join-Path $cacheRoot $path),$newTime)
+    }
+    [IO.File]::WriteAllText("$cacheRoot/windows/target/deps/library.rlib",'corrupted cached output')
+    $rejected=$false
+    try{& $cacheDriver -Operation Restore -Architecture $cacheArch -Context 'compiler-profile-v1' -Root $cacheRoot}catch{$rejected=$true}
+    Assert-PathCheck ($rejected -and (Get-Item "$cacheRoot/windows/src/lib.rs").LastWriteTimeUtc -eq $newTime) "$cacheArch changed artifacts fail before any source timestamp is restored"
+
+    $objects=Join-Path $cacheRoot "build/native-$cacheArch"
+    foreach($name in 'mode_icons','setup'){
+        [IO.File]::WriteAllText("$objects/$name.res.tmp",(Get-Content "$objects/$name.res" -Raw))
+        [IO.File]::SetLastWriteTimeUtc("$objects/$name.res.tmp",$newTime)
+    }
+    . ([scriptblock]::Create($resourceLoop.Extent.Text))
+    Assert-PathCheck ((Get-Item "$objects/mode_icons.res").LastWriteTimeUtc -eq $originalTime) "$cacheArch byte-identical resources retain the cached timestamp"
+    $resourceBytes=Get-Content "$objects/mode_icons.res" -Raw
+    Remove-Item -LiteralPath "$objects/mode_icons.res"
+    foreach($name in 'mode_icons','setup'){
+        $bytes=if($name -eq 'mode_icons'){$resourceBytes}else{Get-Content "$objects/setup.res" -Raw}
+        [IO.File]::WriteAllText("$objects/$name.res.tmp",$bytes)
+        [IO.File]::SetLastWriteTimeUtc("$objects/$name.res.tmp",$newTime)
+    }
+    . ([scriptblock]::Create($resourceLoop.Extent.Text))
+    Assert-PathCheck ((Get-Item "$objects/mode_icons.res").LastWriteTimeUtc -eq $newTime -and (Get-Content "$objects/mode_icons.res" -Raw) -ceq $resourceBytes) "$cacheArch missing native cache regenerates identical bytes with a new timestamp"
+    [IO.File]::WriteAllText("$objects/mode_icons.res.tmp",'changed resource bytes')
+    [IO.File]::WriteAllText("$objects/setup.res.tmp",(Get-Content "$objects/setup.res" -Raw))
+    . ([scriptblock]::Create($resourceLoop.Extent.Text))
+    Assert-PathCheck ((Get-Content "$objects/mode_icons.res" -Raw) -ceq 'changed resource bytes') "$cacheArch changed resource output replaces the cached resource"
+}
+
 $verifyAst=Read-DriverAst "$project/scripts/verify.ps1"
 $runtimeAssignment=$verifyAst.Find({param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left.Extent.Text -eq '$runtimeRoot'},$true)
 $modelGuard=$verifyAst.Find({param($node) $node -is [Management.Automation.Language.IfStatementAst] -and $node.Extent.Text.Contains("throw 'Run prepare-models.ps1 first to prepare the built-in model set.'")},$true)
