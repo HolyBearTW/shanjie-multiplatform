@@ -45,7 +45,7 @@ jobs:
           architecture: x64
       - name: Build x64, WinUI and shared data
         env:
-          CARGO_LOG: cargo::core::compiler::fingerprint=trace
+          CARGO_LOG: cargo::compiler::fingerprint=trace
         run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Build -Architecture x64 -CargoVerbose
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
@@ -74,7 +74,7 @@ jobs:
           architecture: x86
       - name: Build x86 product and recovery probe
         env:
-          CARGO_LOG: cargo::core::compiler::fingerprint=trace
+          CARGO_LOG: cargo::compiler::fingerprint=trace
         run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Build -Architecture x86 -CargoVerbose
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
