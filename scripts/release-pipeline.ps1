@@ -4,7 +4,8 @@ param(
     [ValidateSet('x64','x86')][string]$Architecture='x64',
     [ValidateSet('cap','mixed','share','latency')][string]$Shard,
     [string]$SnapshotId,
-    [string]$SnapshotHash
+    [string]$SnapshotHash,
+    [switch]$CargoVerbose
 )
 $ErrorActionPreference='Stop'
 $root=Split-Path $PSScriptRoot -Parent
@@ -17,7 +18,7 @@ $identity=Get-ReleaseIdentity $root
 if(!$identity.clean){throw 'Parallel RELEASE requires a clean source checkout.'}
 
 if($Phase -eq 'Build'){
-    & "$PSScriptRoot/build.ps1" -Architecture $Architecture -PackageTargetsOnly -SkipSharedData:($Architecture -eq 'x86')
+    & "$PSScriptRoot/build.ps1" -Architecture $Architecture -PackageTargetsOnly -SkipSharedData:($Architecture -eq 'x86') -CargoVerbose:$CargoVerbose
     if($Architecture -eq 'x64'){& "$PSScriptRoot/prepare-licenses.ps1"}
     $triple=if($Architecture -eq 'x64'){'x86_64-pc-windows-msvc'}else{'i686-pc-windows-msvc'}
     $paths=@(if($Architecture -eq 'x64'){'dist'}else{'dist/x86'})+@("windows/target/$triple/release/shanjie_windows.lib","windows/target/$triple/release/shanjie-reliability-check.exe")

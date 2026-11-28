@@ -44,7 +44,9 @@ jobs:
           role: build
           architecture: x64
       - name: Build x64, WinUI and shared data
-        run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Build -Architecture x64
+        env:
+          CARGO_LOG: cargo::core::compiler::fingerprint=trace
+        run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Build -Architecture x64 -CargoVerbose
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: release-build-x64-${{ github.run_id }}-${{ github.run_attempt }}
@@ -71,7 +73,9 @@ jobs:
           role: build
           architecture: x86
       - name: Build x86 product and recovery probe
-        run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Build -Architecture x86
+        env:
+          CARGO_LOG: cargo::core::compiler::fingerprint=trace
+        run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Build -Architecture x86 -CargoVerbose
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: release-build-x86-${{ github.run_id }}-${{ github.run_attempt }}

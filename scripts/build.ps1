@@ -37,6 +37,14 @@ try {
     }
     $objects = Join-Path $root "build/native-$Architecture"
     $output = Join-Path $root "dist/$Architecture"
+    if($CargoVerbose){
+        foreach($inputPath in @("$objects/mode_icons.res","$objects/setup.res","$root/windows/build.rs","$root/windows/src/lib.rs","$root/shared/src/lib.rs")){
+            if(Test-Path -LiteralPath $inputPath){
+                $item=Get-Item -LiteralPath $inputPath
+                Write-Host "[CARGO INPUT] $inputPath mtime=$($item.LastWriteTimeUtc.ToString('O')) sha256=$((Get-FileHash -LiteralPath $inputPath).Hash)"
+            }else{Write-Host "[CARGO INPUT] $inputPath MISSING"}
+        }
+    }
     New-Item -ItemType Directory -Path $objects,$output -Force | Out-Null
     $toolchainSetup = if($UseCurrentToolchain){''}else{'call "'+(Join-Path $vs 'VC/Auxiliary/Build/vcvarsall.bat')+'" '+$Architecture+' >nul'}
     $command = @"
