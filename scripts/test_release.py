@@ -335,17 +335,17 @@ class ReleaseTests(unittest.TestCase):
             r.assets_for(self.config, self.folder)
     def test_release_ready_requires_successful_required_package_jobs(self):
         workflow = (r.ROOT / '.github/workflows/release-platforms.yml').read_text(encoding='utf-8')
-        ready = workflow.split('\n  release-ready:\n', 1)[1].split('\n  linux:\n', 1)[0]
+        ready = workflow.split('\n  release-ready:\n', 1)[1].split('\n  z-linux:\n', 1)[0]
         needs = re.search(r'^    needs: \[(.+)\]$', ready, re.M)[1]
-        self.assertCountEqual([name.strip() for name in needs.split(',')], ['package', 'linux-artifact-gate'])
-        gate = workflow.split('\n  linux-artifact-gate:\n', 1)[1]
-        self.assertIn('needs: linux-manifest', gate)
+        self.assertCountEqual([name.strip() for name in needs.split(',')], ['package', 'z-linux-artifact-gate'])
+        gate = workflow.split('\n  z-linux-artifact-gate:\n', 1)[1]
+        self.assertIn('needs: z-linux-manifest', gate)
         self.assertIn('scripts/release.py check --platform linux --folder build/linux-gate', gate)
-        self.assertIn('needs.linux-artifact-gate.outputs.artifact_name', ready)
+        self.assertIn('needs.z-linux-artifact-gate.outputs.artifact_name', ready)
         raw = re.search(r'    if: >-\n((?:      .*\n)+)', ready).group(1).strip()
         expression = ' '.join(raw.removeprefix('${{').removesuffix('}}').split())
         expression = expression.replace('always()', 'True').replace('inputs.build_linux', 'linux_enabled')
-        expression = expression.replace('needs.package.result', 'windows_result').replace('needs.linux-artifact-gate.result', 'linux_result')
+        expression = expression.replace('needs.package.result', 'windows_result').replace('needs.z-linux-artifact-gate.result', 'linux_result')
         expression = expression.replace('&&', ' and ').replace('||', ' or ').replace('!', ' not ')
         for linux_enabled in [False, True]:
             for windows_result in ['success', 'failure', 'cancelled', 'skipped']:
@@ -370,19 +370,19 @@ class ReleaseTests(unittest.TestCase):
             self.assertTrue(ready, 'Workflow dependencies must be complete and acyclic')
             levels.update(ready)
         self.assertEqual(levels['package'], 5)
-        self.assertEqual(levels['linux-artifact-gate'], levels['package'])
-        self.assertCountEqual(dependencies['release-ready'], ['package', 'linux-artifact-gate'])
-        linux = {name for name in jobs if name.startswith('linux')}
+        self.assertEqual(levels['z-linux-artifact-gate'], levels['package'])
+        self.assertCountEqual(dependencies['release-ready'], ['package', 'z-linux-artifact-gate'])
+        linux = {name for name in jobs if name.startswith('z-linux')}
         windows = set(jobs) - linux - {'release-ready'}
         for platform, other_platform in [(linux, windows), (windows, linux)]:
             for name in platform:
                 with self.subTest(job=name):
                     self.assertFalse(set(dependencies[name]) & other_platform)
-        manifest = jobs['linux-manifest']
-        self.assertEqual(dependencies['linux-manifest'], ['linux-package'])
+        manifest = jobs['z-linux-manifest']
+        self.assertEqual(dependencies['z-linux-manifest'], ['z-linux-package'])
         self.assertIn('scripts/release.py manifest --platform linux', manifest)
-        self.assertIn('needs.linux-package.outputs.artifact_name', manifest)
-        self.assertIn('needs.linux-manifest.outputs.artifact_name', jobs['linux-artifact-gate'])
+        self.assertIn('needs.z-linux-package.outputs.artifact_name', manifest)
+        self.assertIn('needs.z-linux-manifest.outputs.artifact_name', jobs['z-linux-artifact-gate'])
     def test_linux_artifact_gate_checks_only_linux_without_github(self):
         self.config['build_linux'] = True
         linux = self.folder / 'linux'
