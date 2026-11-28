@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   z-linux:
-    name: Linux
+    name: Build
     if: inputs.build_linux
     runs-on: ubuntu-latest
     # Linux 版的目標是 Fedora 44 GNOME；在同版容器建置，GTK 4／libadwaita 與 glibc 和使用者一致。
@@ -54,7 +54,7 @@ jobs:
           retention-days: 3
 
   z-linux-ctest:
-    name: Linux CTest
+    name: CTest
     needs: z-linux
     runs-on: ubuntu-latest
     container: fedora:44
@@ -100,7 +100,7 @@ jobs:
           retention-days: 3
 
   z-linux-package:
-    name: Linux Package
+    name: Package
     needs: z-linux-ctest
     runs-on: ubuntu-latest
     outputs:

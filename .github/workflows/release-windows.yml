@@ -27,7 +27,7 @@ permissions:
 
 jobs:
   build-x64:
-    name: Windows x64
+    name: x64
     runs-on: windows-2025-vs2026
     timeout-minutes: 45
     defaults:
@@ -56,7 +56,7 @@ jobs:
           retention-days: 3
 
   build-x86:
-    name: Windows x86
+    name: x86
     runs-on: windows-2025-vs2026
     timeout-minutes: 45
     defaults:
@@ -85,7 +85,7 @@ jobs:
           retention-days: 3
 
   prepare-core:
-    name: Windows Core
+    name: Core
     runs-on: windows-2025-vs2026
     timeout-minutes: 45
     defaults:
@@ -111,7 +111,7 @@ jobs:
           retention-days: 3
 
   seal:
-    name: Windows CTest
+    name: CTest
     needs: [build-x64, build-x86, prepare-core]
     runs-on: windows-2025-vs2026
     timeout-minutes: 15
@@ -158,7 +158,7 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-  Windows-CTest:
+  CTest:
     name: ${{ matrix.name }}
     needs: seal
     outputs:
@@ -170,11 +170,11 @@ jobs:
       fail-fast: true
       matrix:
         include:
-        - name: Windows CTest x64
+        - name: CTest x64
           phase: Verify
           architecture: x64
           shard: ''
-        - name: Windows CTest x86
+        - name: CTest x86
           phase: Verify
           architecture: x86
           shard: ''
@@ -251,10 +251,10 @@ jobs:
 
   aggregate:
     name: CTest Merge
-    needs: Windows-CTest
+    needs: CTest
     outputs:
-      snapshot_id: ${{ needs.Windows-CTest.outputs.snapshot_id }}
-      snapshot_sha256: ${{ needs.Windows-CTest.outputs.snapshot_sha256 }}
+      snapshot_id: ${{ needs.CTest.outputs.snapshot_id }}
+      snapshot_sha256: ${{ needs.CTest.outputs.snapshot_sha256 }}
     runs-on: windows-2025-vs2026
     timeout-minutes: 15
     defaults:
@@ -268,15 +268,15 @@ jobs:
         run: pwsh -NoProfile -File scripts/sync-upstream.ps1
       - uses: ./.github/actions/release-snapshot
         with:
-          id: ${{ needs.Windows-CTest.outputs.snapshot_id }}
+          id: ${{ needs.CTest.outputs.snapshot_id }}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
-          pattern: release-verify-${{ needs.Windows-CTest.outputs.snapshot_id }}-*
+          pattern: release-verify-${{ needs.CTest.outputs.snapshot_id }}-*
           merge-multiple: true
           path: build/parallel/evidence-download
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
-          pattern: release-core-${{ needs.Windows-CTest.outputs.snapshot_id }}-*
+          pattern: release-core-${{ needs.CTest.outputs.snapshot_id }}-*
           merge-multiple: true
           path: build/parallel/evidence-download
       - name: Extract verification evidence
@@ -286,10 +286,10 @@ jobs:
             if ($LASTEXITCODE) { throw 'Evidence extraction failed.' }
           }
       - name: Verify core receipts
-        run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Aggregate -SnapshotId '${{ needs.Windows-CTest.outputs.snapshot_id }}' -SnapshotHash '${{ needs.Windows-CTest.outputs.snapshot_sha256 }}'
+        run: pwsh -NoProfile -File scripts/release-pipeline.ps1 -Phase Aggregate -SnapshotId '${{ needs.CTest.outputs.snapshot_id }}' -SnapshotHash '${{ needs.CTest.outputs.snapshot_sha256 }}'
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: release-evidence-${{ needs.Windows-CTest.outputs.snapshot_id }}
+          name: release-evidence-${{ needs.CTest.outputs.snapshot_id }}
           path: build/parallel/evidence.tar
           compression-level: 0
           if-no-files-found: error
@@ -303,7 +303,7 @@ jobs:
           retention-days: 7
 
   package:
-    name: Windows Package
+    name: Package
     needs: aggregate
     runs-on: windows-2025-vs2026
     timeout-minutes: 20

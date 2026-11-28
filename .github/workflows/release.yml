@@ -43,7 +43,7 @@ jobs:
           python3 scripts/release.py plan "${flags[@]}"
 
   windows:
-    name: Release
+    name: Windows Release
     needs: release
     uses: ./.github/workflows/release-windows.yml
     with:
@@ -51,7 +51,7 @@ jobs:
       publish: ${{ needs.release.outputs.publish == 'true' }}
 
   z-linux:
-    name: Release
+    name: Linux Release
     needs: release
     if: needs.release.outputs.build_linux == 'true'
     uses: ./.github/workflows/release-linux.yml

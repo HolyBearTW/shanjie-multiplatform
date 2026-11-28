@@ -390,16 +390,16 @@ class ReleaseTests(unittest.TestCase):
         self.assertEqual(levels['package'], 5)
         self.assertNotIn('release-ready', jobs)
         self.assertNotIn('z-linux-manifest', jobs)
-        self.assertIn('name: Windows CTest', jobs['seal'])
-        self.assertIn('name: ${{ matrix.name }}', jobs['Windows-CTest'])
-        rows = re.findall(r'- name: ([^\n]+)\n\s+phase: (Verify|Shard)\n\s+architecture: ([^\n]+)\n\s+shard: ([^\n]+)', jobs['Windows-CTest'])
+        self.assertIn('name: CTest', jobs['seal'])
+        self.assertIn('name: ${{ matrix.name }}', jobs['CTest'])
+        rows = re.findall(r'- name: ([^\n]+)\n\s+phase: (Verify|Shard)\n\s+architecture: ([^\n]+)\n\s+shard: ([^\n]+)', jobs['CTest'])
         self.assertEqual(len({name for name, _, _, _ in rows}), 6)
         self.assertCountEqual([(phase, arch.strip("'"), shard.strip("'")) for _, phase, arch, shard in rows],
                               [('Verify', 'x64', ''), ('Verify', 'x86', '')] + [('Shard', '', shard) for shard in ['cap', 'mixed', 'share', 'latency']])
-        self.assertIn('fail-fast: true', jobs['Windows-CTest'])
-        self.assertIn("if: matrix.phase == 'Verify'", jobs['Windows-CTest'])
-        self.assertIn("if: matrix.phase == 'Shard'", jobs['Windows-CTest'])
-        self.assertEqual(dependencies['aggregate'], ['Windows-CTest'])
+        self.assertIn('fail-fast: true', jobs['CTest'])
+        self.assertIn("if: matrix.phase == 'Verify'", jobs['CTest'])
+        self.assertIn("if: matrix.phase == 'Shard'", jobs['CTest'])
+        self.assertEqual(dependencies['aggregate'], ['CTest'])
         linux = {name for name in jobs if name.startswith('z-linux')}
         windows = set(jobs) - linux
         for platform, other_platform in [(linux, windows), (windows, linux)]:
