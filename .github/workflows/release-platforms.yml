@@ -342,7 +342,7 @@ jobs:
 
   release-ready:
     name: Release Ready
-    needs: [linux-artifact-gate, package]
+    needs: [package, linux-artifact-gate]
     if: >-
       ${{ always() && needs.package.result == 'success' &&
           ((inputs.build_linux && needs.linux-artifact-gate.result == 'success') ||
@@ -358,7 +358,7 @@ jobs:
         run: echo 'Required platform artifacts are ready.'
 
   linux:
-    name: Linux
+    name: Z Linux
     if: inputs.build_linux
     runs-on: ubuntu-latest
     # Linux 版的目標是 Fedora 44 GNOME；在同版容器建置，GTK 4／libadwaita 與 glibc 和使用者一致。
@@ -395,7 +395,7 @@ jobs:
           retention-days: 3
 
   linux-ctest:
-    name: Linux CTest
+    name: Z Linux CTest
     needs: linux
     runs-on: ubuntu-latest
     container: fedora:44
@@ -441,7 +441,7 @@ jobs:
           retention-days: 3
 
   linux-package:
-    name: Linux Package
+    name: Z Linux Package
     needs: linux-ctest
     runs-on: ubuntu-latest
     outputs:
@@ -496,7 +496,7 @@ jobs:
           retention-days: 7
 
   linux-artifact-gate:
-    name: Linux Artifact Gate
+    name: Z Linux Artifact Gate
     needs: linux-manifest
     runs-on: ubuntu-latest
     outputs:
